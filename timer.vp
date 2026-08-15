@@ -1,0 +1,36 @@
+from glfw3 import *
+from tea import *
+from windows import *
+
+/*fn timer_getNow(T : tea_State*) : void
+{
+    var t : float64 = 0.0;
+//#ifdef _WIN32
+    let ft : FILETIME;
+    GetSystemTimeAsFileTime(&ft);
+    t = (ft.dwHighDateTime * 4294967296.0 / 1e7) + ft.dwLowDateTime / 1e7;
+    t -= float64(11644473600.0);
+//#else
+//    struct timeval tv;
+//    gettimeofday(&tv, NULL);
+//    t = tv.tv_sec + tv.tv_usec / 1e6;
+//#endif
+    tea_push_number(T, t);
+}*/
+
+fn timer_getTime(T : tea_State*) : void
+{
+    let time : float64 = glfwGetTime();
+    tea_push_number(T, time);
+}
+
+let treg : const tea_Reg[] = {
+    //{"getNow", timer_getNow, 0, 0},
+    {"getTime", timer_getTime, 0, 0},
+    {}
+};
+
+pub fn micro_open_timer(T : tea_State*) : void
+{
+    tea_create_submodule(T, "timer", treg);
+}

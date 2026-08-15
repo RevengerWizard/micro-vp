@@ -1,0 +1,1087 @@
+// Version of rxi's sera library
+
+import std::math as math
+import std::mem as mem
+import std::io as io
+
+def PI2 : float32 = 6.28318530718;
+
+pub union sr_Pixel
+{
+    word : uint32;
+    struct
+    {
+        r, g, b, a : uint8;
+    }
+}
+
+pub struct sr_Rect
+{
+    x, y, w, h : int32;
+}
+
+pub struct sr_DrawMode
+{
+    color : sr_Pixel;
+    alpha, blend : uint8;
+}
+
+pub struct sr_Transform
+{
+    ox, oy, r, sx, sy : float32;
+}
+
+pub struct sr_Buffer
+{
+    mode : sr_DrawMode;
+    clip : sr_Rect;
+    pixels : sr_Pixel*;
+    w, h : int32;
+    flags : uint8;
+}
+
+struct sr_Point
+{
+    x, y : int32;
+}
+
+struct sr_RandState
+{
+    x, y, z, w : uint32;
+}
+
+def SR_BUFFER_SHARED : uint8 = 1 << 0;
+def SR_RGB_MASK : uint32 = 0xffffff;
+
+def SR_FMT_BGRA = 0;
+pub def SR_FMT_RGBA = 1;
+def SR_FMT_ARGB = 2;
+def SR_FMT_ABGR = 3;
+
+def SR_BLEND_ALPHA = 0;
+def SR_BLEND_COLOR = 1;
+def SR_BLEND_ADD = 2;
+def SR_BLEND_SUBTRACT = 3;
+def SR_BLEND_MULTIPLY = 4;
+def SR_BLEND_LIGHTEN = 5;
+def SR_BLEND_DARKEN = 6;
+def SR_BLEND_SCREEN = 7;
+def SR_BLEND_DIFFERENCE = 8;
+
+def FX_BITS = 12;
+def FX_UNIT = 1 << FX_BITS;
+def FX_MASK = FX_UNIT - 1;
+
+var initted : bool = false;
+var div8Table : uint8[256][256];
+
+inline fn lerp(bits : int32, a : int32, b : int32, p : int32) : int32
+{
+    return a + (((b - a) * p) >> bits);
+}
+
+inline fn swapi(a : int32*, b : int32*) : void
+{
+    var tmp : int32 = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+inline fn max(a : int32, b : int32) : int32
+{
+    return a > b ? a : b;
+}
+
+inline fn maxu8(a : uint8, b : uint8) : uint8
+{
+    return a > b ? a : b;
+}
+
+inline fn min(a : int32, b : int32) : int32
+{
+    return a < b ? a : b;
+}
+
+inline fn minu8(a : uint8, b : uint8) : uint8
+{
+    return a < b ? a : b;
+}
+
+inline fn clamp(x : int32, lo : int32, hi : int32) : int32
+{
+    return x < lo ? lo : (x > hi ? hi : x);
+}
+
+inline fn clampu8(x : uint8, lo : uint8, hi : uint8) : uint8
+{
+    return x < lo ? lo : (x > hi ? hi : x);
+}
+
+fn tableInit() : void
+{
+    if initted return;
+    for var b : int32 = 1; b < 256; b++
+    {
+        for var a : int32; a < 256; a++
+        {
+            div8Table[a][b] = intcast(uint8, (a << 8) / b);
+        }
+    }
+    initted = true;
+}
+
+fn check(cond : bool, fname : uint8*, msg : uint8*) : void
+{
+    if !cond
+    {
+        // write to stderr and abort
+        //std::io::eprint(fname);
+        //std::io::eprint("() ");
+        //std::io::eprintln(msg);
+        //std::os::exit(1);
+    }
+}
+
+fn xdiv(n : int32, x : int32) : int32
+{
+    if x == 0 return n;
+    return n / x;
+}
+
+fn rand128init(seed : uint32) : sr_RandState
+{
+    var s : sr_RandState;
+    s.x = (seed & 0xff000000) | 1;
+    s.y = seed & 0xff0000;
+    s.z = seed & 0xff00;
+    s.w = seed & 0xff;
+    return s;
+}
+
+fn rand128(s : sr_RandState*) : uint32
+{
+    var t : uint32 = s.x ^ (s.x << 11);
+    s.x = s.y;
+    s.y = s.z;
+    s.z = s.w;
+    s.w = s.w ^ (s.w >> 19) ^ t ^ (t >> 8);
+    return s.w;
+}
+
+fn clipRect(r : sr_Rect*, to : sr_Rect*) : void
+{
+    var x1 : int32 = max(r.x, to.x);
+    var y1 : int32 = max(r.y, to.y);
+    var x2 : int32 = min(r.x + r.w, to.x + to.w);
+    var y2 : int32 = min(r.y + r.h, to.y + to.h);
+    r.x = x1;
+    r.y = y1;
+    r.w = max(x2 - x1, 0);
+    r.h = max(y2 - y1, 0);
+}
+
+fn clipRectAndOffset(r : sr_Rect*, x : int32*, y : int32*, to : sr_Rect*) : void
+{
+    var d : int32;
+    d = to.x - *x;
+    if d > 0
+    {
+        *x += d;
+        r.w -= d;
+        r.x += d;
+    }
+    d = to.y - *y;
+    if d > 0
+    {
+        *y += d;
+        r.h -= d;
+        r.y += d;
+    }
+    d = (*x + r.w) - (to.x + to.w);
+    if d > 0 { r.w -= d; }
+    d = (*y + r.h) - (to.y + to.h);
+    if d > 0 { r.h -= d; }
+}
+
+fn initBuffer(b : sr_Buffer*, pixels : void*, w : int32, h : int32) : void
+{
+    tableInit();
+    b.pixels = pixels;
+    b.w = w;
+    b.h = h;
+    sr_reset(b);
+}
+
+pub fn sr_pixel(r : int32, g : int32, b : int32, a : int32) : sr_Pixel
+{
+    var p : sr_Pixel;
+    p.r = clampu8(intcast(uint8, r), 0, 0xff);
+    p.g = clampu8(intcast(uint8, g), 0, 0xff);
+    p.b = clampu8(intcast(uint8, b), 0, 0xff);
+    p.a = clampu8(intcast(uint8, a), 0, 0xff);
+    return p;
+}
+
+pub fn sr_color(r : int32, g : int32, b : int32) : sr_Pixel
+{
+    return sr_pixel(r, g, b, 0xff);
+}
+
+pub fn sr_transform() : sr_Transform
+{
+    var t : sr_Transform;
+    t.ox = 0;
+    t.oy = 0;
+    t.sx = 1;
+    t.sy = 1;
+    t.r  = 0;
+    return t;
+}
+
+pub fn sr_rect(x : int32, y : int32, w : int32, h : int32) : sr_Rect
+{
+    var r : sr_Rect;
+    r.x = x;
+    r.y = y;
+    r.w = w;
+    r.h = h;
+    return r;
+}
+
+pub fn sr_newBuffer(w : int32, h : int32) : sr_Buffer*?
+{
+    check(w > 0, "sr_newBuffer", "expected width of 1 or greater");
+    check(h > 0, "sr_newBuffer", "expected height of 1 or greater");
+    var b : sr_Buffer* = mem::alloc(sizeof(sr_Buffer));
+    if b == nil return nil;
+    b.pixels = mem::alloc(intcast(usize, w * h) * sizeof(sr_Pixel));
+    if b.pixels == nil
+    {
+        mem::free(b);
+        return nil;
+    }
+    initBuffer(b, b.pixels, w, h);
+    return b;
+}
+
+pub fn sr_newBufferShared(pixels : void*, w : int32, h : int32) : sr_Buffer*?
+{
+    var b : sr_Buffer* = mem::alloc(sizeof(sr_Buffer));
+    if b == nil return nil;
+    initBuffer(b, pixels, w, h);
+    b.flags |= SR_BUFFER_SHARED;
+    return b;
+}
+
+pub fn sr_cloneBuffer(src : sr_Buffer*) : sr_Buffer*?
+{
+    let b : sr_Buffer* = sr_newBuffer(src.w, src.h);
+    if b == nil return nil;
+    var pixels : sr_Pixel* = b.pixels;
+    let len : usize = intcast(usize, b.w * b.h) * sizeof(sr_Pixel);
+    mem::copy(pixels, src.pixels, len);
+    mem::copy(b, src, sizeof(sr_Buffer));
+    b.pixels = pixels;
+    return b;
+}
+
+pub fn sr_destroyBuffer(b : sr_Buffer*) : void
+{
+    if (~b.flags & SR_BUFFER_SHARED) != 0
+    {
+        mem::free(b.pixels);
+    }
+    mem::free(b);
+}
+
+pub fn sr_loadPixels(b : sr_Buffer*, src : void*, fmt : int32) : void
+{
+    var sr : uint32;
+    var sg : uint32;
+    var sb : uint32;
+    var sa : uint32;
+    var i : int32 = b.w * b.h;
+    var s : uint32* = src;
+    switch fmt
+    case SR_FMT_BGRA { sr = 16; sg = 8;  sb = 0;  sa = 24; }
+    case SR_FMT_RGBA { sr = 0;  sg = 8;  sb = 16; sa = 24; }
+    case SR_FMT_ARGB { sr = 8;  sg = 16; sb = 24; sa = 0; }
+    case SR_FMT_ABGR { sr = 24; sg = 16; sb = 8;  sa = 0; }
+    default { check(false, "sr_loadPixels", "bad fmt"); }
+    while i-- != 0
+    {
+        b.pixels[i].r = intcast(uint8, s[i] >> sr) & 0xff;
+        b.pixels[i].g = intcast(uint8, s[i] >> sg) & 0xff;
+        b.pixels[i].b = intcast(uint8, s[i] >> sb) & 0xff;
+        b.pixels[i].a = intcast(uint8, s[i] >> sa) & 0xff;
+    }
+}
+
+pub fn sr_loadPixels8(b : sr_Buffer*, src : uint8*, pal : sr_Pixel*?) : void
+{
+    var i : int32 = b.w * b.h;
+    while i-- != 0
+    {
+        if pal != nil
+        {
+            b.pixels[i] = pal[intcast(usize, src[i])];
+        }
+        else
+        {
+            b.pixels[i] = sr_pixel(0xff, 0xff, 0xff, intcast(int32, src[i]));
+        }
+    }
+}
+
+pub fn sr_setBlend(b : sr_Buffer*, blend : int32) : void
+{
+    b.mode.blend = intcast(uint8, blend);
+}
+
+pub fn sr_setAlpha(b : sr_Buffer*, alpha : int32) : void
+{
+    b.mode.alpha = intcast(uint8, clamp(alpha, 0, 0xff));
+}
+
+pub fn sr_setColor(b : sr_Buffer*, c : sr_Pixel) : void
+{
+    b.mode.color.word = c.word & SR_RGB_MASK;
+}
+
+pub fn sr_setClip(b : sr_Buffer*, r : sr_Rect) : void
+{
+    b.clip = r;
+    var full : sr_Rect = sr_rect(0, 0, b.w, b.h);
+    clipRect(&b.clip, &full);
+}
+
+pub fn sr_reset(b : sr_Buffer*) : void
+{
+    sr_setBlend(b, SR_BLEND_ALPHA);
+    sr_setAlpha(b, 0xff);
+    sr_setColor(b, sr_color(0xff, 0xff, 0xff));
+    sr_setClip(b, sr_rect(0, 0, b.w, b.h));
+}
+
+pub fn sr_clear(b : sr_Buffer*, c : sr_Pixel) : void
+{
+    var i : int32 = b.w * b.h;
+    while i-- != 0
+    {
+        b.pixels[i] = c;
+    }
+}
+
+pub fn sr_getPixel(b : sr_Buffer*, x : int32, y : int32) : sr_Pixel
+{
+    if x >= 0 and y >= 0 and x < b.w and y < b.h
+    {
+        return b.pixels[x + y * b.w];
+    }
+    var p : sr_Pixel;
+    p.word = 0;
+    return p;
+}
+
+pub fn sr_setPixel(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32) : void
+{
+    if x >= 0 and y >= 0 and x < b.w and y < b.h
+    {
+        b.pixels[x + y * b.w] = c;
+    }
+}
+
+fn copyPixelsBasic(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : sr_Rect) : void
+{
+    // Clip to destination buffer
+    clipRectAndOffset(&s, &x, &y, &b.clip);
+    if s.w <= 0 or s.h <= 0
+        return;
+    // Copy pixels
+    var i : int32 = 0;
+    while i < s.h
+    {
+        mem::copy(ptrcast(void*, b.pixels + x + (y + i) * b.w),
+                  ptrcast(void*, src.pixels + s.x + (s.y + i) * src.w),
+                  intcast(usize, s.w) * sizeof(sr_Pixel));
+        i++;
+    }
+}
+
+fn copyPixelsScaled(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : sr_Rect, scalex : float32, scaley : float32) : void
+{
+    var w : int32 = s.w * intcast(int32, scalex);
+    var h : int32 = s.h * intcast(int32, scaley);
+    var inx : int32 = FX_UNIT / intcast(int32, scalex);
+    var iny : int32 = FX_UNIT / intcast(int32, scaley);
+    var d : int32;
+    // Clip to destination buffer
+    d = b.clip.x - x;
+    if d > 0 { x += d; s.x += d / intcast(int32, scalex); w -= d; }
+    d = b.clip.y - y;
+    if d > 0 { y += d; s.y += d / intcast(int32, scaley); h -= d; }
+    d = (x + w) - (b.clip.x + b.clip.w);
+    if d > 0 { w -= d; }
+    d = (y + h) - (b.clip.y + b.clip.h);
+    if d > 0 { h -= d; }
+    // Clipped offscreen?
+    if w == 0 or h == 0
+        return;
+    // Draw
+    var sy  : int32 = s.y << FX_BITS;
+    var dy  : int32 = y;
+    while dy < y + h
+    {
+        var p : sr_Pixel* = ptrcast(sr_Pixel*, src.pixels + (s.x >> FX_BITS) + src.w * (sy >> FX_BITS));
+        var sx : int32 = 0;
+        var dx : int32 = x + b.w * dy;
+        var edx : int32 = dx + w;
+        while dx < edx
+        {
+            b.pixels[dx] = p[sx >> FX_BITS];
+            dx++;
+            sx += inx;
+        }
+        sy += iny;
+        dy++;
+    }
+}
+
+pub fn sr_copyPixels(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, sub : sr_Rect*, sx : float32, sy : float32) : void
+{
+    sx = math::absf32(sx);
+    sy = math::absf32(sy);
+    if sx == 0.0 or sy == 0.0 return;
+    var s : sr_Rect;
+    // Check sub rectangle
+    if sub != nil
+    {
+        if sub.w <= 0 or sub.h <= 0 return;
+        s = *sub;
+        //check(s.x >= 0 and s.y >= 0 and s.x + s.w <= src.w and s.y + s.h <= src.h,
+        //      "sr_copyPixels", "sub rectangle out of bounds");
+    }
+    else
+    {
+        s = sr_rect(0, 0, src.w, src.h);
+    }
+    // Dispatch
+    if sx == 1.0 and sy == 1.0
+    {
+        // Basic un-scaled copy
+        copyPixelsBasic(b, src, x, y, s);
+    }
+    else
+    {
+        // Scaled copy
+        copyPixelsScaled(b, src, x, y, s, sx, sy);
+    }
+}
+
+pub fn sr_noise(b : sr_Buffer*, seed : uint32, low : int32, high : int32, grey : int32) : void
+{
+    var rng : sr_RandState = rand128init(seed);
+    low  = clamp(low, 0, 0xfe);
+    high = clamp(high, low + 1, 0xff);
+    var i : int32 = b.w * b.h;
+    if grey != 0
+    {
+        while i-- != 0
+        {
+            b.pixels[i].r = intcast(uint8, intcast(uint8, low) + rand128(&rng) % intcast(uint8, high - low));
+            b.pixels[i].g = b.pixels[i].r;
+            b.pixels[i].b = b.pixels[i].r;
+            b.pixels[i].a = 0xff;
+        }
+    }
+    else
+    {
+        while i-- != 0
+        {
+            b.pixels[i].word = rand128(&rng) | ~SR_RGB_MASK;
+            b.pixels[i].r = intcast(uint8, low) + b.pixels[i].r % intcast(uint8, high - low);
+            b.pixels[i].g = intcast(uint8, low) + b.pixels[i].g % intcast(uint8, high - low);
+            b.pixels[i].b = intcast(uint8, low) + b.pixels[i].b % intcast(uint8, high - low);
+        }
+    }
+}
+
+fn floodFill(b : sr_Buffer*, c : sr_Pixel, o : sr_Pixel, x : int32, y : int32) : void
+{
+    if y < 0 or y >= b.h or x < 0 or x >= b.w or
+       b.pixels[x + y * b.w].word != o.word
+        return;
+    // Fill left
+    var il : int32 = x;
+    while il >= 0 and b.pixels[il + y * b.w].word == o.word
+    {
+        b.pixels[il + y * b.w] = c;
+        il--;
+    }
+    // Fill right
+    var ir : int32 = (x < b.w - 1) ? (x + 1) : x;
+    while ir < b.w and b.pixels[ir + y * b.w].word == o.word
+    {
+        b.pixels[ir + y * b.w] = c;
+        ir++;
+    }
+    // Fill up and down
+    while il <= ir
+    {
+        floodFill(b, c, o, il, y - 1);
+        floodFill(b, c, o, il, y + 1);
+        il++;
+    }
+}
+
+pub fn sr_floodFill(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32) : void
+{
+    floodFill(b, c, sr_getPixel(b, x, y), x, y);
+}
+
+fn blendPixel(m : sr_DrawMode*, d : sr_Pixel*, s : sr_Pixel) : void
+{
+    var alpha : int32 = (intcast(int32, s.a) * intcast(int32, m.alpha)) >> 8;
+    if alpha <= 1 return;
+    // Color modulation
+    if m.color.word != SR_RGB_MASK
+    {
+        s.r = (s.r * m.color.r) >> 8;
+        s.g = (s.g * m.color.g) >> 8;
+        s.b = (s.b * m.color.b) >> 8;
+    }
+    // Blend mode
+    switch m.blend
+    case SR_BLEND_ALPHA {}
+    case SR_BLEND_COLOR
+    {
+        s = m.color;
+    }
+    case SR_BLEND_ADD
+    {
+        s.r = minu8(d.r + s.r, 0xff);
+        s.g = minu8(d.g + s.g, 0xff);
+        s.b = minu8(d.b + s.b, 0xff);
+    }
+    case SR_BLEND_SUBTRACT
+    {
+        s.r = maxu8(d.r - s.r, 0);
+        s.g = maxu8(d.g - s.g, 0);
+        s.b = maxu8(d.b - s.b, 0);
+    }
+    case SR_BLEND_MULTIPLY
+    {
+        s.r = (s.r * d.r) >> 8;
+        s.g = (s.g * d.g) >> 8;
+        s.b = (s.b * d.b) >> 8;
+    }
+    case SR_BLEND_LIGHTEN
+    {
+        if s.r + s.g + s.b <= d.r + d.g + d.b
+        {
+            s = *d;
+        }
+    }
+    case SR_BLEND_DARKEN
+    {
+        if s.r + s.g + s.b >= d.r + d.g + d.b
+        {
+            s = *d;
+        }
+    }
+    case SR_BLEND_SCREEN
+    {
+        s.r = 0xff - (((0xff - d.r) * (0xff - s.r)) >> 8);
+        s.g = 0xff - (((0xff - d.g) * (0xff - s.g)) >> 8);
+        s.b = 0xff - (((0xff - d.b) * (0xff - s.b)) >> 8);
+    }
+    case SR_BLEND_DIFFERENCE
+    {
+        s.r = intcast(uint8, math::absi32(intcast(int32, s.r - d.r)));
+        s.g = intcast(uint8, math::absi32(intcast(int32, s.g - d.g)));
+        s.b = intcast(uint8, math::absi32(intcast(int32, s.b - d.b)));
+    }
+    // Write
+    if alpha >= 254
+    {
+        *d = s;
+    }
+    else if d.a >= 254
+    {
+        d.r = intcast(uint8, lerp(8, intcast(int32, d.r), intcast(int32, s.r), alpha));
+        d.g = intcast(uint8, lerp(8, intcast(int32, d.g), intcast(int32, s.g), alpha));
+        d.b = intcast(uint8, lerp(8, intcast(int32, d.b), intcast(int32, s.b), alpha));
+    }
+    else
+    {
+        var a : int32 = 0xff - (((0xff - intcast(int32, d.a)) * (0xff - alpha)) >> 8);
+        var z : int32 = (intcast(int32, d.a) * (0xff - alpha)) >> 8;
+        d.r = div8Table[((intcast(int32, d.r) * z) >> 8) + ((intcast(int32, s.r) * alpha) >> 8)][a];
+        d.g = div8Table[((intcast(int32, d.g) * z) >> 8) + ((intcast(int32, s.g) * alpha) >> 8)][a];
+        d.b = div8Table[((intcast(int32, d.b) * z) >> 8) + ((intcast(int32, s.b) * alpha) >> 8)][a];
+        d.a = intcast(uint8, a);
+    }
+}
+
+pub fn sr_drawPixel(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32) : void
+{
+    if x >= b.clip.x and x < b.clip.x + b.clip.w and
+       y >= b.clip.y and y < b.clip.y + b.clip.h
+    {
+        blendPixel(&b.mode, ptrcast(sr_Pixel*, b.pixels + x + y * b.w), c);
+    }
+}
+
+pub fn sr_drawLine(b : sr_Buffer*, c : sr_Pixel, x0 : int32, y0 : int32, x1 : int32, y1 : int32) : void
+{
+    var steep : bool = math::absi32(y1 - y0) > math::absi32(x1 - x0);
+    if steep
+    {
+        swapi(&x0, &y0);
+        swapi(&x1, &y1);
+    }
+    if x0 > x1
+    {
+        swapi(&x0, &x1);
+        swapi(&y0, &y1);
+    }
+    var deltax : int32 = x1 - x0;
+    var deltay : int32 = math::absi32(y1 - y0);
+    var error : int32 = deltax / 2;
+    var ystep : int32 = (y0 < y1) ? 1 : -1;
+    var y : int32 = y0;
+    var x : int32 = x0;
+    while x <= x1
+    {
+        if steep
+        {
+            sr_drawPixel(b, c, y, x);
+        }
+        else
+        {
+            sr_drawPixel(b, c, x, y);
+        }
+        error -= deltay;
+        if error < 0
+        {
+            y += ystep;
+            error += deltax;
+        }
+        x++;
+    }
+}
+
+pub fn sr_drawFilledRect(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32, w : int32, h : int32) : void
+{
+    var r : sr_Rect = sr_rect(x, y, w, h);
+    //var r : sr_Rect = sr_Rect::{x, y, w, h};
+    clipRect(&r, &b.clip);
+    var iy : int32 = r.h;
+    while iy-- != 0
+    {
+        var p : sr_Pixel* = ptrcast(sr_Pixel*, b.pixels + r.x + (r.y + iy) * b.w);
+        var ix : int32 = r.w;
+        while ix-- != 0
+        {
+            blendPixel(&b.mode, p++, c);
+        }
+    }
+}
+
+pub fn sr_drawRect(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32, w : int32, h : int32) : void
+{
+    sr_drawFilledRect(b, c, x + 1, y, w - 1, 1);
+    sr_drawFilledRect(b, c, x, y + h - 1, w - 1, 1);
+    sr_drawFilledRect(b, c, x, y, 1, h - 1);
+    sr_drawFilledRect(b, c, x + w - 1, y + 1, 1, h - 1);
+}
+
+fn drawRow(b : sr_Buffer*, c : sr_Pixel, rows : uint32*, rx : int32, ry : int32, len : int32) : void
+{
+    if ry >= 0 and (intcast(int32, ~rows[ry >> 5]) & (1 << (ry & 31))) != 0
+    {
+        sr_drawFilledRect(b, c, rx, ry, len, 1);
+        rows[ry >> 5] |= intcast(uint32, 1 << (ry & 31));
+    }
+}
+
+pub fn sr_drawFilledCircle(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32, r : int32) : void
+{
+    var dx : int32 = math::absi32(r);
+    var dy : int32 = 0;
+    var radiusError : int32 = 1 - dx;
+    var rows : uint32[512]; // Already zeroed
+    // Clipped completely off-screen?
+    if x + dx < b.clip.x or x - dx > b.clip.x + b.clip.w or
+       y + dx < b.clip.y or y - dx > b.clip.y + b.clip.h
+        return;
+    /* zeroset bit array of drawn rows -- we keep track of which rows have been
+    * drawn so that we can avoid overdraw */
+    while dx >= dy
+    {
+        drawRow(b, c, ptrcast(uint32*, rows), x - dx, y + dy, dx << 1);
+        drawRow(b, c, ptrcast(uint32*, rows), x - dx, y - dy, dx << 1);
+        drawRow(b, c, ptrcast(uint32*, rows), x - dy, y + dx, dy << 1);
+        drawRow(b, c, ptrcast(uint32*, rows), x - dy, y - dx, dy << 1);
+        dy++;
+        if radiusError < 0
+        {
+            radiusError += 2 * dy + 1;
+        }
+        else
+        {
+            dx--;
+            radiusError += 2 * (dy - dx + 1);
+        }
+    }
+}
+
+pub fn sr_drawCircle(b : sr_Buffer*, c : sr_Pixel, x : int32, y : int32, r : int32) : void
+{
+    // TODO : Prevent against overdraw?
+    var dx : int32 = math::absi32(r);
+    var dy : int32 = 0;
+    var radiusError : int32 = 1 - dx;
+    // Clipped completely off-screen?
+    if x + dx < b.clip.x or x - dx > b.clip.x + b.clip.w or
+       y + dx < b.clip.y or y - dx > b.clip.y + b.clip.h
+        return;
+    // Draw
+    while dx >= dy
+    {
+        sr_drawPixel(b, c,  dx + x,  dy + y);
+        sr_drawPixel(b, c,  dy + x,  dx + y);
+        sr_drawPixel(b, c, -dx + x,  dy + y);
+        sr_drawPixel(b, c, -dy + x,  dx + y);
+        sr_drawPixel(b, c, -dx + x, -dy + y);
+        sr_drawPixel(b, c, -dy + x, -dx + y);
+        sr_drawPixel(b, c,  dx + x, -dy + y);
+        sr_drawPixel(b, c,  dy + x, -dx + y);
+        dy++;
+        if radiusError < 0
+        {
+            radiusError += 2 * dy + 1;
+        }
+        else
+        {
+            dx--;
+            radiusError += 2 * (dy - dx + 1);
+        }
+    }
+}
+
+fn drawBufferBasic(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : sr_Rect) : void
+{
+    // Clip to destination buffer
+    clipRectAndOffset(&s, &x, &y, &b.clip);
+    // Clipped off screen?
+    if s.w <= 0 or s.h <= 0
+        return;
+    // Draw
+    for var iy : int32 = 0; iy < s.h; iy++
+    {
+        var pd : sr_Pixel* = ptrcast(sr_Pixel*, b.pixels + x + (y + iy) * b.w);
+        var ps : sr_Pixel* = ptrcast(sr_Pixel*, src.pixels + s.x + (s.y + iy) * src.w);
+        var ix : int32 = s.w;
+        while ix-- != 0
+        {
+            blendPixel(&b.mode, pd++, *ps++);
+        }
+    }
+}
+
+fn drawBufferScaled(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : sr_Rect, a : sr_Transform) : void
+{
+    var absSx : float32 = (a.sx < 0.0) ? -a.sx : a.sx;
+    var absSy : float32 = (a.sy < 0.0) ? -a.sy : a.sy;
+    var w : int32 = intcast(int32, math::floorf32(floatcast(float32, s.w) * absSx + 0.5));
+    var h : int32 = intcast(int32, math::floorf32(floatcast(float32, s.h) * absSy + 0.5));
+    var osx : int32 = (a.sx < 0.0) ? (s.w << FX_BITS) - 1 : 0;
+    var osy : int32 = (a.sy < 0.0) ? (s.h << FX_BITS) - 1 : 0;
+    var ix : int32 = (s.w << FX_BITS) / intcast(int32, a.sx) / s.w;
+    var iy : int32 = (s.h << FX_BITS) / intcast(int32, a.sy) / s.h;
+    var d : int32;
+    // Adjust x/y depending on origin
+    x = x - ((a.sx < 0.0) ? w : 0) - (a.sx < 0.0 ? -1 : 1) * intcast(int32, a.ox) * intcast(int32, absSx);
+    y = y - ((a.sy < 0.0) ? h : 0) - (a.sy < 0.0 ? -1 : 1) * intcast(int32, a.oy) * intcast(int32, absSy);
+    // Clipped completely offscreen horizontally?
+    if x + w < b.clip.x or x > b.clip.x + b.clip.w
+        return;
+    // Adjust for clipping
+    var dy : int32 = 0;
+    var odx : int32 = 0;
+    d = b.clip.y - y;
+    if d > 0
+    {
+        dy = d;
+        s.y += d / intcast(int32, a.sy);
+    }
+    d = b.clip.x - x;
+    if d > 0
+    {
+        odx = d;
+        s.x += d / intcast(int32, a.sx);
+    }
+    d = (y + h) - (b.clip.y + b.clip.h);
+    if d > 0 { h -= d; }
+    d = (x + w) - (b.clip.x + b.clip.w);
+    if d > 0 { w -= d; }
+    // Draw
+    var sy : int32 = osy;
+    while dy < h
+    {
+        var dx : int32 = odx;
+        var sx : int32 = osx;
+        while dx < w
+        {
+            blendPixel(&b.mode,
+                       ptrcast(sr_Pixel*, b.pixels + (x + dx) + (y + dy) * b.w),
+                       src.pixels[(s.x + (sx >> FX_BITS)) + (s.y + (sy >> FX_BITS)) * src.w]);
+            sx += ix;
+            dx++;
+        }
+        sy += iy;
+        dy++;
+    }
+}
+
+fn drawScanline(b : sr_Buffer*, src : sr_Buffer*, s : sr_Rect*, left : int32, right : int32, dy : int32, sx : int32, sy : int32, sxIncr : int32, syIncr : int32) : void
+{
+    var d : int32;
+    var x : int32;
+    var y : int32;
+    var dx : int32;
+    // Adjust for clipping
+    if dy < b.clip.y or dy >= b.clip.y + b.clip.h
+        return;
+    d = b.clip.x - left;
+    if d > 0 { left += d; sx += d * sxIncr; sy += d * syIncr; }
+    d = right - (b.clip.x + b.clip.w);
+    if d > 0 { right -= d; }
+    /* Does the scaline length go out of bounds of our `s` rect? If so we
+    * should adjust the scan line and the source coordinates accordingly */
+    // checkSourceLeft:
+    while true
+    {
+        x = sx >> FX_BITS;
+        y = sy >> FX_BITS;
+        if x < s.x or y < s.y or x >= s.x + s.w or y >= s.y + s.h
+        {
+            left++;
+            sx += sxIncr;
+            sy += syIncr;
+            if left >= right return;
+            continue;
+            //goto checkSourceLeft;
+        }
+        break;
+    }
+    // checkSourceRight:
+    while true
+    {
+        x = (sx + sxIncr * (right - left)) >> FX_BITS;
+        y = (sy + syIncr * (right - left)) >> FX_BITS;
+        if x < s.x or y < s.y or x >= s.x + s.w or y >= s.y + s.h
+        {
+            right--;
+            if left >= right return;
+            continue;
+            //goto checkSourceRight;
+        }
+        break;
+    }
+    // Draw
+    dx = left;
+    while dx < right
+    {
+        blendPixel(&b.mode,
+                   ptrcast(sr_Pixel*, b.pixels + dx + dy * b.w),
+                   src.pixels[(sx >> FX_BITS) + (sy >> FX_BITS) * src.w]);
+        sx += sxIncr;
+        sy += syIncr;
+        dx++;
+    }
+}
+
+fn drawBufferRotatedScaled(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : sr_Rect, a : sr_Transform) : void
+{
+    var p : sr_Point[4];
+    var top : sr_Point;
+    var bottom : sr_Point;
+    var left : sr_Point;
+    var right : sr_Point;
+    var dy : int32;
+    var xl : int32;
+    var xr : int32;
+    var il : int32;
+    var ir : int32;
+    var sx : int32;
+    var sy : int32;
+    var sxi : int32;
+    var syi : int32;
+    var sxoi : int32;
+    var syoi : int32;
+    var tsx : int32;
+    var tsy : int32;
+    var tsxi : int32;
+    var tsyi : int32;
+    var cosr : float32 = math::cosf32(a.r);
+    var sinr : float32 = math::sinf32(a.r);
+    var absSx : float32 = (a.sx < 0.0) ? -a.sx : a.sx;
+    var absSy : float32 = (a.sy < 0.0) ? -a.sy : a.sy;
+    var invX : bool = a.sx < 0.0;
+    var invY : bool = a.sy < 0.0;
+    var w : int32 = intcast(int32, floatcast(float32, s.w) * absSx);
+    var h : int32 = intcast(int32, floatcast(float32, s.h) * absSy);
+    var q : int32 = intcast(int32, a.r * 4.0 / PI2);
+    var cosq : float32 = math::cosf32(floatcast(float32, q) * PI2 / 4.0);
+    var sinq : float32 = math::sinf32(floatcast(float32, q) * PI2 / 4.0);
+    var ox : float32 = (invX ? floatcast(float32, s.w) - a.ox : a.ox) * absSx;
+    var oy : float32 = (invY ? floatcast(float32, s.h) - a.oy : a.oy) * absSy;
+    // Store rotated corners as points — all arithmetic in float, cast at assignment
+    p[0].x = x + intcast(int32, cosr * (-ox) - sinr * (-oy));
+    p[0].y = y + intcast(int32, sinr * (-ox) + cosr * (-oy));
+    p[1].x = x + intcast(int32, cosr * (-ox + floatcast(float32, w)) - sinr * (-oy));
+    p[1].y = y + intcast(int32, sinr * (-ox + floatcast(float32, w)) + cosr * (-oy));
+    p[2].x = x + intcast(int32, cosr * (-ox + floatcast(float32, w)) - sinr * (-oy + floatcast(float32, h)));
+    p[2].y = y + intcast(int32, sinr * (-ox + floatcast(float32, w)) + cosr * (-oy + floatcast(float32, h)));
+    p[3].x = x + intcast(int32, cosr * (-ox) - sinr * (-oy + floatcast(float32, h)));
+    p[3].y = y + intcast(int32, sinr * (-ox) + cosr * (-oy + floatcast(float32, h)));
+    // Set named points based on rotation
+    top    = p[(-q + 0) & 3];
+    right  = p[(-q + 1) & 3];
+    bottom = p[(-q + 2) & 3];
+    left   = p[(-q + 3) & 3];
+    // Clipped completely off screen?
+    if bottom.y < b.clip.y or top.y >= b.clip.y + b.clip.h return;
+    if right.x  < b.clip.x or left.x >= b.clip.x + b.clip.w return;
+    // Destination
+    xl = top.x << FX_BITS;
+    xr = xl;
+    il = xdiv((left.x  - top.x) << FX_BITS, left.y  - top.y);
+    ir = xdiv((right.x - top.x) << FX_BITS, right.y - top.y);
+    // Source increments — multiply int by float, then truncate
+    sxi  = intcast(int32, floatcast(float32, xdiv(s.w << FX_BITS, w)) * math::cosf32(-a.r));
+    syi  = intcast(int32, floatcast(float32, xdiv(s.h << FX_BITS, h)) * math::sinf32(-a.r));
+    sxoi = intcast(int32, floatcast(float32, xdiv(s.w << FX_BITS, left.y - top.y)) * sinq);
+    syoi = intcast(int32, floatcast(float32, xdiv(s.h << FX_BITS, left.y - top.y)) * cosq);
+    switch q
+    case 0
+    {
+        sx = s.x << FX_BITS;
+        sy = s.y << FX_BITS;
+    }
+    case 1
+    {
+        sx = s.x << FX_BITS;
+        sy = ((s.y + s.h) << FX_BITS) - 1;
+    }
+    case 2
+    {
+        sx = ((s.x + s.w) << FX_BITS) - 1;
+        sy = ((s.y + s.h) << FX_BITS) - 1;
+    }
+    case 3
+    {
+        sx = ((s.x + s.w) << FX_BITS) - 1;
+        sy = s.y << FX_BITS;
+    }
+    default
+    {
+        sx = s.x << FX_BITS;
+        sy = s.y << FX_BITS;
+    }
+    // Draw
+    if left.y == top.y or right.y == top.y
+    {
+        dy = top.y - 1;
+    }
+    else
+    {
+        dy = top.y;
+    }
+    while dy <= bottom.y
+    {
+        /* Invert source iterators & increments if we are scaled negatively */
+        if invX
+        {
+            tsx = ((s.x * 2 + s.w) << FX_BITS) - sx - 1;
+            tsxi = -sxi;
+        }
+        else
+        {
+            tsx = sx;
+            tsxi = sxi;
+        }
+        if invY
+        {
+            tsy = ((s.y * 2 + s.h) << FX_BITS) - sy - 1;
+            tsyi = -syi;
+        }
+        else
+        {
+            tsy = sy;
+            tsyi = syi;
+        }
+        drawScanline(b, src, &s, xl >> FX_BITS, xr >> FX_BITS, dy,
+                     tsx, tsy, tsxi, tsyi);
+        sx += sxoi;
+        sy += syoi;
+        xl += il;
+        xr += ir;
+        dy++;
+        if dy == left.y
+        {
+            il   = xdiv((bottom.x - left.x) << FX_BITS, bottom.y - left.y);
+            sxoi = intcast(int32, floatcast(float32, xdiv(s.w << FX_BITS, bottom.y - left.y)) * cosq);
+            syoi = intcast(int32, floatcast(float32, xdiv(s.h << FX_BITS, bottom.y - left.y)) * (-sinq));
+        }
+        if dy == right.y
+        {
+            ir = xdiv((bottom.x - right.x) << FX_BITS, bottom.y - right.y);
+        }
+    }
+}
+
+pub fn sr_drawBuffer(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, sub : sr_Rect*?, t : sr_Transform*?) : void
+{
+    var s : sr_Rect;
+    // Init sub rect
+    if sub != nil
+    {
+        if sub.w <= 0 or sub.h <= 0 return;
+        s = *sub;
+        //check(s.x >= 0 and s.y >= 0 and s.x + s.w <= src.w and s.y + s.h <= src.h,
+        //      "sr_drawBuffer", "sub rectangle out of bounds");
+    }
+    else
+    {
+        s = sr_rect(0, 0, src.w, src.h);
+    }
+    // Draw
+    if t == nil
+    {
+        drawBufferBasic(b, src, x, y, s);
+    }
+    else
+    {
+        var a : sr_Transform = *t;
+        // Move rotation value into 0..2π range
+        a.r = math::modf32(math::modf32(a.r, PI2) + PI2, PI2);
+        // Not rotated or scaled? apply offset and draw basic
+        if a.r == 0.0 and a.sx == 1.0 and a.sy == 1.0
+        {
+            x -= intcast(int32, a.ox);
+            y -= intcast(int32, a.oy);
+            drawBufferBasic(b, src, x, y, s);
+        }
+        else if a.r == 0.0
+        {
+            drawBufferScaled(b, src, x, y, s, a);
+        }
+        else
+        {
+            drawBufferRotatedScaled(b, src, x, y, s, a);
+        }
+    }
+}

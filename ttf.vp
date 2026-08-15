@@ -1,0 +1,216 @@
+import std::mem as mem
+import std::io as io
+import std::math as math
+
+from stb_truetype import *
+
+pub struct ttf_Font
+{
+    font : stbtt_fontinfo;
+    fontData : void*;
+    ptsize : float32;
+    scale : float32;
+    baseline : int32;
+}
+
+/* ttf.vp provides some higher level functionality around `stb_truetype` --
+ * most importantly it provides a function which takes a string and a font and
+ * returns an 8bit bitmap of the rendered string's text.
+ *
+ * For better results for our use case (writing each character straight to a
+ * single buffer), stb_truetype.h has been slightly modified at the end of the
+ * stbtt__rasterize_sorted_edges() function so that the character is added to
+ * the buffer rather than overwriting whatever already exists in it; this is
+ * beneficial in situations where character bounding boxes may overlap.
+ */
+
+fn iceil(x : float32) : int32
+{
+    return intcast(int32, math::ceilf32(x));
+}
+
+pub fn ttf_new(data : const void*, len : int32) : ttf_Font*?
+{
+    //let self : ttf_Font*? = mem::calloc(1, sizeof(ttf_Font));
+    let self : ttf_Font*? = mem::alloc(sizeof(ttf_Font));
+    mem::set(self, 0, sizeof(ttf_Font));
+    if self == nil return nil;
+    // Copy font data
+    self.fontData = mem::alloc(intcast(usize, len));
+    if self.fontData == nil
+    {
+        ttf_destroy(self);
+        return nil;
+    }
+    mem::copy(self.fontData, data, intcast(usize, len));
+    // Init font
+    if stbtt_InitFont(&self.font, self.fontData, 0) == 0
+    {
+        ttf_destroy(self);
+        return nil;
+    }
+    // Init font size
+    ttf_ptsize(self, 8.0);
+    return self;
+}
+
+pub fn ttf_destroy(self : ttf_Font*) : void
+{
+    mem::free(self.fontData);
+    mem::free(self);
+}
+
+pub fn ttf_ptsize(self : ttf_Font*, ptsize : float32) : void
+{
+    var ascent : int32;
+    var descent : int32;
+    var lineGap : int32;
+    self.ptsize = ptsize;
+    self.scale = stbtt_ScaleForMappingEmToPixels(&self.font, self.ptsize);
+    stbtt_GetFontVMetrics(&self.font, &ascent, &descent, &lineGap);
+    self.baseline = intcast(int32, floatcast(float32, ascent) * self.scale) + 1;
+}
+
+pub fn ttf_height(self : ttf_Font*) : int32
+{
+    var ascent : int32;
+    var descent : int32;
+    var lineGap : int32;
+    stbtt_GetFontVMetrics(&self.font, &ascent, &descent, &lineGap);
+    return iceil(floatcast(float32, (ascent - descent + lineGap)) * self.scale) + 1;
+}
+
+fn ttf_utf8toCodepoint(p : const uint8*, res : uint32*) : const uint8*
+{
+    var x : uint32;
+    var mask : uint32;
+    var shift : uint32;
+    switch (*p & 0xf0)
+    case 0xf0
+    {
+        mask = 0x07;
+        shift = 18;
+    }
+    case 0xe0
+    {
+        mask = 0x0f;
+        shift = 12;
+    }
+    case 0xc0
+    {
+        mask = 0x1f;
+        shift = 6;
+    }
+    case 0xd0
+    {
+        mask = 0x1f;
+        shift = 6;
+    }
+    default
+    {
+        *res = intcast(uint32, *p);
+        return p + 1;
+    }
+    x = (intcast(uint32, *p) & mask) << shift;
+    do
+    {
+        // Return early if we reach an unexpected nil
+        //if *(++p) == '\0'
+        p++;
+        if *p == '\0'
+        {
+            *res = x;
+            return p;
+        }
+        shift -= 6;
+        x |= (*p & 0x3f) << shift;
+    }
+    while shift != 0;
+    *res = x;
+    return p + 1;
+}
+
+fn ttf_charWidthf(self : ttf_Font*, c : int32, last : int32) : float32
+{
+    var res : int32 = 0;
+    var width : int32;
+    var lsb : int32;
+    stbtt_GetCodepointHMetrics(&self.font, c, &width, &lsb);
+    res = width;
+    if last != 0
+    {
+        var kerning : int32 = stbtt_GetCodepointKernAdvance(&self.font, last, c);
+        res += kerning;
+    }
+    return floatcast(float32, res) * self.scale;
+}
+
+pub fn ttf_width(self : ttf_Font*, str : const uint8*) : int32
+{
+    var res : float32 = 0.0;
+    var last : int32 = 0;
+    var p : const uint8* = str;
+    while *p != 0
+    {
+        var c : uint32;
+        p = ttf_utf8toCodepoint(p, &c);
+        res += ttf_charWidthf(self, intcast(int32, c), last);
+        last = intcast(int32, c);
+    }
+    return iceil(res);
+}
+
+import std::conv as conv
+
+pub fn ttf_render(self : ttf_Font*, str : const uint8*, w : int32*, h : int32*) : void*?
+{
+    *w = ttf_width(self, str);
+    *h = ttf_height(self);
+    let pixels : void*? = mem::calloc(1, intcast(usize, *w) * intcast(usize, *h));
+    if pixels == nil return nil;
+    var p : const uint8* = str;
+    var xoffset : float32 = 0.0;
+    var xfract : float32 = 0.0;
+    var last : int32 = 0;
+    while *p != 0
+    {
+        // Get unicode codepoint
+        var c : uint32 = 0;
+        p = ttf_utf8toCodepoint(p, &c);
+        // Get char placement coords
+        var x0 : int32;
+        var y0 : int32;
+        var x1 : int32;
+        var y1 : int32;
+        if intcast(int32, c)  > 0xffff
+        {
+            io::write(io::stdout, "wat ", 4, nil);
+            let buf : uint8[20];
+
+            var s : usize = conv::i32tos(buf, 20, intcast(int32, c));
+            io::write(io::stdout, buf, s, nil);
+            io::putc('\n');
+            //io::putc(intcast(uint8, c));
+            //io::putc('\n');
+        }
+        stbtt_GetCodepointBitmapBoxSubpixel(
+            &self.font, intcast(int32, c), self.scale, self.scale, xfract, 0.0,
+            &x0, &y0, &x1, &y1);
+        // Work out position / max size
+        var x : int32 = intcast(int32, xoffset + floatcast(float32, x0));
+        var y : int32 = self.baseline + y0;
+        if x < 0 { x = 0; }
+        if y < 0 { y = 0; }
+        // Render char
+        stbtt_MakeCodepointBitmapSubpixel(
+            &self.font,
+            ptrcast(uint8*, ptrcast(uint8*, pixels) + intcast(isize, x) + (intcast(isize, y * *w))),
+            *w - x, *h - y, *w, self.scale, self.scale,
+            xfract, 0.0, intcast(int32, c));
+        // Next
+        xoffset += ttf_charWidthf(self, intcast(int32, c), last);
+        xfract = xoffset - floatcast(float32, intcast(int32, xoffset));
+        last = intcast(int32, c);
+    }
+    return pixels;
+}

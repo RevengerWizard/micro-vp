@@ -1,0 +1,305 @@
+import std::str as str
+import std::mem as mem
+import std::io as io
+
+from glfw3 import *
+
+pub enum GLEQtype : int32
+{
+    GLEQ_NONE,
+    GLEQ_WINDOW_MOVED,
+    GLEQ_WINDOW_RESIZED,
+    GLEQ_WINDOW_CLOSED,
+    GLEQ_WINDOW_REFRESH,
+    GLEQ_WINDOW_FOCUSED,
+    GLEQ_WINDOW_DEFOCUSED,
+    GLEQ_WINDOW_ICONIFIED,
+    GLEQ_WINDOW_UNICONIFIED,
+    GLEQ_FRAMEBUFFER_RESIZED,
+    GLEQ_BUTTON_PRESSED,
+    GLEQ_BUTTON_RELEASED,
+    GLEQ_CURSOR_MOVED,
+    GLEQ_CURSOR_ENTERED,
+    GLEQ_CURSOR_LEFT,
+    GLEQ_SCROLLED,
+    GLEQ_KEY_PRESSED,
+    GLEQ_KEY_REPEATED,
+    GLEQ_KEY_RELEASED,
+    GLEQ_CODEPOINT_INPUT,
+    GLEQ_MONITOR_CONNECTED,
+    GLEQ_MONITOR_DISCONNECTED,
+}
+
+struct GLEQpos
+{
+    x, y : int32;
+}
+struct GLEQsize
+{
+    width, height : int32;
+}
+struct GLEQscroll
+{
+    x, y : float64;
+}
+struct GLEQkeyboard
+{
+    key, scancode, mods : int32;
+}
+struct GLEQmouse
+{
+    button, mods : int32;
+}
+
+pub struct GLEQevent
+{
+    tt : GLEQtype;
+    union
+    {
+        window : GLFWwindow*;
+        monitor : GLFWmonitor*;
+        joystick : int32;
+    }
+    union
+    {
+        pos : GLEQpos;
+        size : GLEQsize;
+        scroll : GLEQscroll;
+        keyboard : GLEQkeyboard;
+        mouse : GLEQmouse;
+        codepoint : uint32;
+    }
+}
+
+def GLEQ_CAPACITY : usize = 256;
+
+struct GLEQqueue
+{
+    events : GLEQevent[GLEQ_CAPACITY];
+    head : usize;
+    tail : usize;
+}
+
+let gleq_queue : GLEQqueue = {};
+
+/*fn gleq_strdup(string : const uint8*) : uint8*
+{
+    let size : usize = str::len(string) + 1;
+    let result : uint8* = mem::alloc(size);
+    mem::copy(result, string, size);
+    return result;
+}*/
+
+fn gleq_new_event() : GLEQevent*
+{
+    //let event : GLEQevent* = ptrcast(GLEQevent*, gleq_queue.events + gleq_queue.head);
+    let event : GLEQevent* = &gleq_queue.events[gleq_queue.head];
+    gleq_queue.head = (gleq_queue.head + 1) % GLEQ_CAPACITY;
+    if gleq_queue.head == gleq_queue.tail
+    {
+        io::write(io::stdout, "ASSERT: head == tail\n", 26, nil);
+    }
+    mem::set(event, 0, sizeof(GLEQevent));
+    return event;
+}
+
+fn gleq_window_pos_callback(window : GLFWwindow*, x : int32, y : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_WINDOW_MOVED;
+    event.window = window;
+    event.pos.x = x;
+    event.pos.y = y;
+}
+
+/*static void gleq_window_size_callback(GLFWwindow* window, int width, int height)
+{
+    GLEQevent* event = gleq_new_event();
+    event->type = GLEQ_WINDOW_RESIZED;
+    event->window = window;
+    event->size.width = width;
+    event->size.height = height;
+}*/
+
+fn gleq_window_close_callback(window : GLFWwindow*) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_WINDOW_CLOSED;
+    event.window = window;
+}
+
+fn gleq_window_refresh_callback(window : GLFWwindow*) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_WINDOW_REFRESH;
+    event.window = window;
+}
+
+fn gleq_window_focus_callback(window : GLFWwindow*, focused : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.window = window;
+
+    if focused == 1
+    {
+        event.tt = GLEQtype::GLEQ_WINDOW_FOCUSED;
+    }
+    else
+    {
+        event.tt = GLEQtype::GLEQ_WINDOW_DEFOCUSED;
+    }
+}
+
+fn gleq_window_iconify_callback(window : GLFWwindow*, iconified : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.window = window;
+
+    if iconified == 1
+    {
+        event.tt = GLEQtype::GLEQ_WINDOW_ICONIFIED;
+    }
+    else
+    {
+        event.tt = GLEQtype::GLEQ_WINDOW_UNICONIFIED;
+    }
+}
+
+fn gleq_framebuffer_size_callback(window : GLFWwindow*, width : int32, height : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_FRAMEBUFFER_RESIZED;
+    event.window = window;
+    event.size.width = width;
+    event.size.height = height;
+}
+
+fn gleq_mouse_button_callback(window : GLFWwindow*, button : int32, action : int32, mods : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.window = window;
+    event.mouse.button = button;
+    event.mouse.mods = mods;
+
+    if action == GLFW_PRESS
+    {
+        event.tt = GLEQtype::GLEQ_BUTTON_PRESSED;
+    }
+    else if action == GLFW_RELEASE
+    {
+        event.tt = GLEQtype::GLEQ_BUTTON_RELEASED;
+    }
+}
+
+fn gleq_cursor_pos_callback(window : GLFWwindow*, x : float64, y : float64) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_CURSOR_MOVED;
+    event.window = window;
+    event.pos.x = intcast(int32, x);
+    event.pos.y = intcast(int32, y);
+}
+
+fn gleq_cursor_enter_callback(window : GLFWwindow*, entered : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.window = window;
+
+    if entered == 1
+    {
+        event.tt = GLEQtype::GLEQ_CURSOR_ENTERED;
+    }
+    else
+    {
+        event.tt = GLEQtype::GLEQ_CURSOR_LEFT;
+    }
+}
+
+fn gleq_scroll_callback(window : GLFWwindow*, x : float64, y : float64) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_SCROLLED;
+    event.window = window;
+    event.scroll.x = x;
+    event.scroll.y = y;
+}
+
+fn gleq_key_callback(window : GLFWwindow*, key : int32, scancode : int32, action : int32, mods : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.window = window;
+    event.keyboard.key = key;
+    event.keyboard.scancode = scancode;
+    event.keyboard.mods = mods;
+
+    if action == GLFW_PRESS
+    {
+        event.tt = GLEQtype::GLEQ_KEY_PRESSED;
+    }
+    else if action == GLFW_RELEASE
+    {
+        event.tt = GLEQtype::GLEQ_KEY_RELEASED;
+    }
+    else if action == GLFW_REPEAT
+    {
+        event.tt = GLEQtype::GLEQ_KEY_REPEATED;
+    }
+}
+
+fn gleq_char_callback(window : GLFWwindow*, codepoint : uint32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.tt = GLEQtype::GLEQ_CODEPOINT_INPUT;
+    event.window = window;
+    event.codepoint = codepoint;
+}
+
+fn gleq_monitor_callback(monitor : GLFWmonitor*, action : int32) : void
+{
+    let event : GLEQevent* = gleq_new_event();
+    event.monitor = monitor;
+
+    if action == GLFW_CONNECTED
+    {
+        event.tt = GLEQtype::GLEQ_MONITOR_CONNECTED;
+    }
+    else if action == GLFW_DISCONNECTED
+    {
+        event.tt = GLEQtype::GLEQ_MONITOR_DISCONNECTED;
+    }
+}
+
+pub fn gleqTrackWindow(window : GLFWwindow*) : void
+{
+    //glfwSetWindowPosCallback(window, gleq_window_pos_callback);
+    //glfwSetWindowSizeCallback(window, gleq_window_size_callback);
+    glfwSetWindowCloseCallback(window, gleq_window_close_callback);
+    //glfwSetWindowRefreshCallback(window, gleq_window_refresh_callback);
+    //glfwSetWindowFocusCallback(window, gleq_window_focus_callback);
+    //glfwSetWindowIconifyCallback(window, gleq_window_iconify_callback);
+    //glfwSetFramebufferSizeCallback(window, gleq_framebuffer_size_callback);
+    glfwSetMouseButtonCallback(window, gleq_mouse_button_callback);
+    glfwSetCursorPosCallback(window, gleq_cursor_pos_callback);
+    //glfwSetCursorEnterCallback(window, gleq_cursor_enter_callback);
+    //glfwSetScrollCallback(window, gleq_scroll_callback);
+    glfwSetKeyCallback(window, gleq_key_callback);
+    glfwSetCharCallback(window, gleq_char_callback);
+}
+
+pub fn gleqNextEvent(event : GLEQevent*) : bool
+{
+    mem::set(event, 0, sizeof(GLEQevent));
+
+    if gleq_queue.head != gleq_queue.tail
+    {
+        *event = gleq_queue.events[gleq_queue.tail];
+        gleq_queue.tail = (gleq_queue.tail + 1) % GLEQ_CAPACITY;
+    }
+
+    return event.tt != int32(GLEQtype::GLEQ_NONE);
+}
+
+pub fn gleqFreeEvent(event : GLEQevent*) : void
+{
+    mem::set(event, 0, sizeof(GLEQevent));
+}

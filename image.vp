@@ -1,0 +1,207 @@
+import std::mem as mem
+import std::io as io
+from std::io import SeekPos, FILE, OpenMode
+
+from tea import *
+from sera import *
+from stb_image import *
+from fs import *
+
+pub struct Image
+{
+    buf : sr_Buffer*;
+}
+
+pub fn get_color(T : tea_State*, idx : int32) : sr_Pixel
+{
+    let r : tea_Integer = tea_opt_integer(T, idx, 255);
+    let g : tea_Integer = tea_opt_integer(T, idx + 1, 255);
+    let b : tea_Integer = tea_opt_integer(T, idx + 2, 255);
+    let a : tea_Integer = tea_opt_integer(T, idx + 3, 255);
+    return sr_pixel(intcast(int32, r), intcast(int32, g), intcast(int32, b), intcast(int32, a));
+}
+
+pub fn get_rect(T : tea_State*, idx : int32) : sr_Rect
+{
+    //tea_check_map(T, intcast(int32, idx));
+    tea_check_type(T, idx, TEA_TYPE_MAP);
+    tea_push_lstring(T, "x", 1);
+    tea_get_index(T, idx);
+    let x : int32 = intcast(int32, tea_check_integer(T, -1));
+    tea_push_lstring(T, "y", 1);
+    tea_get_index(T, idx);
+    let y : int32 = intcast(int32, tea_check_integer(T, -1));
+    tea_push_lstring(T, "w", 1);
+    tea_get_index(T, idx);
+    let w : int32 = intcast(int32, tea_check_integer(T, -1));
+    tea_push_lstring(T, "h", 1);
+    tea_get_index(T, idx);
+    let h : int32 = intcast(int32, tea_check_integer(T, -1));
+    tea_pop(T, 4);
+    return sr_rect(x, y, w, h);
+}
+
+pub fn check_subrect(T : tea_State*, idx : int32, b : sr_Buffer*, r : sr_Rect*) : void
+{
+    if r.x < 0 or r.y < 0 or r.x + r.w > b.w or r.y + r.h > b.h
+    {
+        tea_arg_error(T, idx, "sub rectangle out of bounds");
+    }
+}
+
+fn image_free(ud : void*) : void
+{
+    let self : Image* = ptrcast(Image*, ud);
+    if self.buf != nil
+    {
+        sr_destroyBuffer(self.buf);
+    }
+}
+
+pub fn micro_image_new(T : tea_State*) : Image*
+{
+    let self : Image* = ptrcast(Image*, tea_new_udata(T, sizeof(Image), "micro.Image"));
+    tea_set_finalizer(T, image_free);
+    //mem::zero(self, sizeof(Image))
+    mem::set(self, 0, sizeof(Image));
+    return self;
+}
+
+fn image_load(self : Image*, data : const void*, len : int32) : bool
+{
+    let w : int32;
+    let h : int32;
+    let pixels : void* = stbi_load_from_memory(data, len, &w, &h, nil, STBI_rgb_alpha);
+    if pixels == nil return true;
+    self.buf = sr_newBuffer(w, h);
+    if self.buf == nil
+    {
+        mem::free(pixels);
+        return true;
+    }
+    sr_loadPixels(self.buf, pixels, SR_FMT_RGBA);
+    mem::free(pixels);
+    return false;
+}
+
+fn image_fromFile(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let self : Image* = micro_image_new(T);
+    let len : usize;
+    let data : void*? = fs_read(filename, &len);
+    if data == nil
+    {
+        //tea_error(T, "could not open file '%s'", filename);
+        tea_error(T, "could not open file");
+    }
+    let err : bool = image_load(self, data, intcast(int32, len));
+    mem::free(data);
+    if err
+    {
+        tea_error(T, "could not load buffer");
+    }
+}
+
+fn image_fromBlank(T : tea_State*) : void
+{
+    let w : int32 = intcast(int32, tea_check_integer(T, 0));
+    let h : int32 = intcast(int32, tea_check_integer(T, 1));
+    if w <= 0
+    {
+        tea_arg_error(T, 1, "expected width greater than 0");
+    }
+    if h <= 0
+    {
+        tea_arg_error(T, 2, "expected height greater than 0");
+    }
+    let self : Image* = micro_image_new(T);
+    self.buf = sr_newBuffer(w, h);
+    sr_clear(self.buf, sr_pixel(0, 0, 0, 0));
+    if self.buf == nil
+    {
+        tea_error(T, "could not create buffer");
+    }
+}
+
+fn image_clone(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let clone : Image* = micro_image_new(T);
+    clone.buf = sr_cloneBuffer(self.buf);
+}
+
+fn image_reset(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    sr_reset(self.buf);
+}
+
+fn image_clear(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    sr_clear(self.buf, get_color(T, 1));
+}
+
+fn image_setPixel(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let x : int32 = intcast(int32, tea_check_integer(T, 1));
+    let y : int32 = intcast(int32, tea_check_integer(T, 2));
+    sr_drawPixel(self.buf, get_color(T, 3), x, y);
+}
+
+fn image_getPixel(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let x : int32 = intcast(int32, tea_check_integer(T, 1));
+    let y : int32 = intcast(int32, tea_check_integer(T, 2));
+    let px : sr_Pixel = sr_getPixel(self.buf, x, y);
+    tea_new_list(T, 4);
+    tea_push_integer(T, intcast(tea_Integer, px.r)); tea_add_item(T, -2);
+    tea_push_integer(T, intcast(tea_Integer, px.g)); tea_add_item(T, -2);
+    tea_push_integer(T, intcast(tea_Integer, px.b)); tea_add_item(T, -2);
+    tea_push_integer(T, intcast(tea_Integer, px.a)); tea_add_item(T, -2);
+}
+
+fn image_getWidth(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    tea_push_integer(T, intcast(tea_Integer, self.buf.w));
+}
+
+fn image_getHeight(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    tea_push_integer(T, intcast(tea_Integer, self.buf.h));
+}
+
+fn image_tostring(T : tea_State*) : void
+{
+    tea_push_string(T, "<Image>");
+}
+
+let ireg : const tea_Methods[] = {
+    {"fromFile", "static", image_fromFile, 1, 0},
+    //{"fromString", "static", image_fromString, 1, 0},
+    {"fromBlank", "static", image_fromBlank, 2, 0},
+    {"clone", "method", image_clone, 1, 0},
+    {"reset", "method", image_reset, 1, 0},
+    {"clear", "method", image_clear, 1, 4},
+    {"setPixel", "method", image_setPixel, 3, 4},
+    {"getPixel", "method", image_getPixel, 3, 0},
+    //{"copyPixels", "method", image_copyPixels, 2, 5},
+    //{"noise", "method", image_noise, 1, 4},
+    //{"floodFill", "method", image_floodFill, 3, 4},
+    {"getWidth", "method", image_getWidth, 1, 0},
+    {"getHeight", "method", image_getHeight, 1, 0},
+    {"tostring", "method", image_tostring, 1, 0},
+    {}
+};
+
+pub fn micro_open_Image(T : tea_State*) : void
+{
+    tea_create_class(T, "Image", ireg);
+    tea_push_value(T, -1);
+    tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Image");
+}

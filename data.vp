@@ -1,0 +1,73 @@
+import std::mem as mem
+
+from tea import *
+
+pub struct Data
+{
+    data : void*;
+    len : usize;
+}
+
+fn data_free(ud : void*) : void
+{
+    let self : Data* = ptrcast(Data*, ud);
+    mem::free(self.data);
+}
+
+fn new_data(T : tea_State*) : Data*
+{
+    let self : Data* = ptrcast(Data*, tea_new_udata(T, sizeof(Data), "micro.Data"));
+    tea_set_finalizer(T, data_free);
+    //mem::zero(self, sizeof(Data))
+    mem::set(self, 0, sizeof(Data));
+    return self;
+}
+
+/*fn data_fromFile(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let self : Data* = new_data(T);
+    let len : usize;
+    let data : void* =
+}*/
+
+fn data_fromString(T : tea_State*) : void
+{
+    let len : usize;
+    let data : const uint8* = tea_check_lstring(T, 0, &len);
+    let self : Data* = new_data(T);
+    self.data = mem::alloc(len);
+    if self.data == nil
+    {
+        tea_error(T, "out of memory");
+    }
+    mem::copy(self.data, data, len);
+    self.len = len;
+}
+
+fn data_getLength(T : tea_State*) : void
+{
+    let self : Data* = ptrcast(Data*, tea_check_udata(T, 0, "micro.Data"));
+    tea_push_integer(T, intcast(tea_Integer, self.len));
+}
+
+fn data_tostring(T : tea_State*) : void
+{
+    let self : Data* = ptrcast(Data*, tea_check_udata(T, 0, "micro.Data"));
+    tea_push_lstring(T, ptrcast(const uint8*, self.data), self.len);
+}
+
+let reg : tea_Methods[] = {
+    //{"fromFile", "static", data_fromFile, 1, 0},
+    {"fromString", "static", data_fromString, 1, 0},
+    {"getLength", "method", data_getLength, 1, 0},
+    {"tostring", "method", data_tostring, 1, 0},
+    {}
+};
+
+pub fn micro_open_Data(T : tea_State*) : void
+{
+    tea_create_class(T, "Data", reg);
+    tea_push_value(T, -1);
+    tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Data");
+}

@@ -1,0 +1,192 @@
+import std::io as io
+import std::os as os
+
+from sera import *
+from tea import *
+from spxe import spxeStart, Px
+from image import get_color, get_rect, check_subrect, Image, micro_image_new
+
+from micro import pixbuf, screen, WIDTH, HEIGHT
+
+var inited : bool = false;
+
+fn gfx_init(T : tea_State*) : void
+{
+    let width : tea_Integer = tea_check_integer(T, 0);
+    let height : tea_Integer = tea_check_integer(T, 1);
+    if inited
+    {
+        tea_error(T, "gfx is already initialized");
+    }
+
+    pixbuf = spxeStart("micrö", 800, 800, intcast(int32, width), intcast(int32, height));
+    if pixbuf == nil
+    {
+        io::write(io::stdout, "could not init pixel buffer", 27, nil);
+        os::exit(98);
+        //tea_error(T, "could not init pixel buffer");
+    }
+    screen = sr_newBufferShared(pixbuf, intcast(int32, width), intcast(int32, height));
+    io::write(io::stdout, "loaded shared sera buffer\n", 26, nil);
+    let img : Image* = micro_image_new(T);
+    img.buf = screen;
+    tea_push_value(T, -1);
+    tea_set_key(T, TEA_REGISTRY_INDEX, "micro.screen");
+
+    inited = true;
+}
+
+fn gfx_setAlpha(T : tea_State*) : void
+{
+    let a : tea_Integer = tea_opt_integer(T, 1, 255);
+    sr_setAlpha(screen, intcast(int32, a));
+}
+
+let modes : const uint8*?[] = {"alpha", "color", "add", "subtract", "multiply", "lighten", "darken", "screen", "difference", nil};
+
+fn gfx_setBlend(T : tea_State*) : void
+{
+    let mode : int32 = tea_check_option(T, 0, "alpha", modes);
+    sr_setBlend(screen, mode);
+}
+
+fn gfx_setColor(T : tea_State*) : void
+{
+    let c : sr_Pixel = get_color(T, 0);
+    sr_setColor(screen, c);
+}
+
+fn gfx_pixel(T : tea_State*) : void
+{
+    /*let x : tea_Integer = tea_check_integer(T, 0);
+    let y : tea_Integer = tea_check_integer(T, 1);
+    let idx : int32 = 2;
+    let r : uint8 = intcast(uint8, tea_opt_integer(T, idx, 255));
+    let g : uint8 = intcast(uint8, tea_opt_integer(T, idx + 1, 255));
+    let b : uint8 = intcast(uint8, tea_opt_integer(T, idx + 2, 255));
+    let a : uint8 = intcast(uint8, tea_opt_integer(T, idx + 3, 255));
+    if x >= 0 and y >= 0 and x < WIDTH and y < HEIGHT
+    {
+        let i : tea_Integer = x + y * WIDTH;
+        pixbuf[i].r = r;
+        pixbuf[i].g = g;
+        pixbuf[i].b = b;
+        pixbuf[i].a = a;
+    }*/
+
+    let x : tea_Integer = tea_check_integer(T, 0);
+    let y : tea_Integer = tea_check_integer(T, 1);
+    let px : sr_Pixel = get_color(T, 2);
+    sr_drawPixel(screen, px, intcast(int32, x), intcast(int32, y));
+}
+
+fn gfx_clear(T : tea_State*) : void
+{
+    let px : sr_Pixel = get_color(T, 0);
+    sr_clear(screen, px);
+    /*
+    let idx : int32 = 0;
+    let r : uint8 = intcast(uint8, tea_opt_integer(T, idx, 255));
+    let g : uint8 = intcast(uint8, tea_opt_integer(T, idx + 1, 255));
+    let b : uint8 = intcast(uint8, tea_opt_integer(T, idx + 2, 255));
+    let a : uint8 = intcast(uint8, tea_opt_integer(T, idx + 3, 255));
+    let i = HEIGHT * WIDTH;
+    while i-- != 0
+    {
+        pixbuf[i].r = r;
+        pixbuf[i].g = g;
+        pixbuf[i].b = b;
+        pixbuf[i].a = a;
+    }*/
+}
+
+let styles : const uint8*?[] = {"fill", "line", nil};
+
+fn gfx_line(T : tea_State*) : void
+{
+    let x1 : tea_Integer = tea_check_integer(T, 0);
+    let y1 : tea_Integer = tea_check_integer(T, 1);
+    let x2 : tea_Integer = tea_check_integer(T, 2);
+    let y2 : tea_Integer = tea_check_integer(T, 3);
+    let px : sr_Pixel = get_color(T, 4);
+    sr_drawLine(screen, px, intcast(int32, x1), intcast(int32, y1), intcast(int32, x2), intcast(int32, y2));
+}
+
+fn gfx_rect(T : tea_State*) : void
+{
+    let id : int32 = tea_check_option(T, 0, nil, styles);
+    let x : tea_Integer = tea_check_integer(T, 1);
+    let y : tea_Integer = tea_check_integer(T, 2);
+    let w : tea_Integer = tea_check_integer(T, 3);
+    let h : tea_Integer = tea_check_integer(T, 4);
+    let px : sr_Pixel = get_color(T, 5);
+    if id == 0
+    {
+        sr_drawFilledRect(screen, px, intcast(int32, x), intcast(int32, y), intcast(int32, w), intcast(int32, h));
+    }
+    else
+    {
+        sr_drawRect(screen, px, intcast(int32, x), intcast(int32, y), intcast(int32, w), intcast(int32, h));
+    }
+}
+
+fn gfx_circle(T : tea_State*) : void
+{
+    let id : int32 = tea_check_option(T, 0, nil, styles);
+    let x : tea_Integer = tea_check_integer(T, 1);
+    let y : tea_Integer = tea_check_integer(T, 2);
+    let radius : tea_Integer = tea_check_integer(T, 3);
+    let px : sr_Pixel = get_color(T, 4);
+    if id == 0
+    {
+        sr_drawFilledCircle(screen, px, intcast(int32, x), intcast(int32, y), intcast(int32, radius));
+    }
+    else
+    {
+        sr_drawCircle(screen, px, intcast(int32, x), intcast(int32, y), intcast(int32, radius));
+    }
+}
+
+fn gfx_draw(T : tea_State*) : void
+{
+    var hasrect : bool = false;
+    var sub : sr_Rect;
+    let t : sr_Transform;
+    let src : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let x : tea_Integer = tea_check_integer(T, 1);
+    let y : tea_Integer = tea_check_integer(T, 2);
+    //if !tea_is_nonenil(T, 3)
+    if !(tea_get_type(T, 3) <= TEA_TYPE_NIL)
+    {
+        hasrect = true;
+        sub = get_rect(T, 3);
+        check_subrect(T, 3, src.buf, &sub);
+    }
+    t.r = floatcast(float32, tea_opt_integer(T, 4, 0));
+    t.sx = floatcast(float32, tea_opt_integer(T, 5, 1));
+    t.sy = floatcast(float32, tea_opt_integer(T, 6, intcast(tea_Integer, t.sx)));
+    t.ox = floatcast(float32, tea_opt_integer(T, 7, 0));
+    t.oy = floatcast(float32, tea_opt_integer(T, 8, 0));
+    sr_drawBuffer(screen, src.buf, intcast(int32, x), intcast(int32, y), hasrect ? &sub : nil, &t);
+    //sr_drawBuffer(screen, src.buf, intcast(int32, x), intcast(int32, y), hasrect ? &sub : nil, nil);
+}
+
+let greg : const tea_Reg[] = {
+    {"init", gfx_init, 2, 0},
+    {"setAlpha", gfx_setAlpha, 0, 1},
+    {"setBlend", gfx_setBlend, 1, 0},
+    {"setColor", gfx_setColor, 0, 4},
+    //{"setMaxFps", gfx_setMaxFps, 0, 4},
+    {"clear", gfx_clear, 0, 4},
+    {"pixel", gfx_pixel, 2, 4},
+    {"line", gfx_line, 4, 4},
+    {"rect", gfx_rect, 5, 4},
+    {"circle", gfx_circle, 4, 4},
+    {"draw", gfx_draw, 3, 6},
+    {}
+};
+
+pub fn micro_open_gfx(T : tea_State*) : void
+{
+    tea_create_submodule(T, "gfx", greg);
+}

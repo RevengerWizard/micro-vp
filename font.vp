@@ -1,0 +1,136 @@
+import std::mem as mem
+
+from ttf import *
+from tea import *
+from sera import *
+from fs import *
+from image import Image, micro_image_new
+
+struct Font
+{
+    font : ttf_Font*;
+}
+
+fn font_free(ud : void*) : void
+{
+    let self : Font* = ptrcast(Font*, ud);
+    if self.font != nil
+    {
+        ttf_destroy(self.font);
+    }
+}
+
+fn font_new(T : tea_State*) : Font*
+{
+    let self : Font* = ptrcast(Font*, tea_new_udata(T, sizeof(Font), "micro.Font"));
+    tea_set_finalizer(T, font_free);
+    mem::set(self, 0, sizeof(Font));
+    return self;
+}
+
+fn load_font(self : Font*, data : const void*, len : int32, ptsize : int32) : const uint8*?
+{
+    self.font = ttf_new(data, len);
+    if self.font == nil
+    {
+        return "could not load font";
+    }
+    ttf_ptsize(self.font, floatcast(float32, ptsize));
+    return nil;
+}
+
+fn font_fromFile(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    //let fontsize : tea_Integer = tea_opt_integer(T, 1, DEFAULT_FONTSIZE);
+    let fontsize : int32 = intcast(int32, tea_opt_integer(T, 1, 8));
+    let self : Font* = font_new(T);
+    let len : usize;
+    let data : void* = fs_read(filename, &len);
+    /* Load new font */
+    if data == nil
+    {
+        //tea_error(T, "could not open file '%s'", filename);
+        tea_error(T, "could not open file");
+    }
+    let err : const uint8* = load_font(self, data, intcast(int32, len), fontsize);
+    mem::free(data);
+    if err != nil
+    {
+        //tea_error(T, "%s", err);
+        tea_error(T, "could not load font");
+    }
+}
+
+/*fn font_fromEmbedded(T : tea_State*)
+{
+#include "font_ttf.h"
+
+    int fontsize = tea_opt_integer(T, 0, DEFAULT_FONTSIZE);
+    Font* self = font_new(T);
+    const char* err = load_font(self, font_ttf, sizeof(font_ttf), fontsize);
+    if(err)
+        tea_error(T, "%s", err);
+}*/
+
+fn font_render(T : tea_State*) : void
+{
+    var w : int32;
+    var h : int32;
+    let self : Font* = ptrcast(Font*, tea_check_udata(T, 0, "micro.Font"));
+    var str : const uint8* = tea_check_string(T, 1);
+    if str == nil or *str == '\0'
+    {
+        str = " ";
+    }
+    let img : Image* = micro_image_new(T);
+    let data : void* = ttf_render(self.font, str, &w, &h);
+    if data == nil
+    {
+        tea_error(T, "could not render text");
+    }
+    /* Load bitmap and free intermediate 8bit bitmap */
+    img.buf = sr_newBuffer(w, h);
+    if img.buf == nil
+    {
+        mem::free(data);
+        tea_error(T, "could not create buffer");
+    }
+    sr_loadPixels8(img.buf, data, nil);
+    mem::free(data);
+}
+
+fn font_getWidth(T : tea_State*) : void
+{
+    let self : Font* = ptrcast(Font*, tea_check_udata(T, 0, "micro.Font"));
+    let str : const uint8* = tea_check_string(T, 1);
+    tea_push_integer(T, intcast(tea_Integer, ttf_width(self.font, str)));
+}
+
+fn font_getHeight(T : tea_State*) : void
+{
+    let self : Font* = ptrcast(Font*, tea_check_udata(T, 0, "micro.Font"));
+    tea_push_integer(T, intcast(tea_Integer, ttf_height(self.font)));
+}
+
+fn font_tostring(T : tea_State*) : void
+{
+    tea_push_string(T, "<Font>");
+}
+
+let freg :  const tea_Methods[] = {
+    {"fromFile", "static", font_fromFile, 1, 1},
+    //{"fromEmbedded", "static", font_fromEmbedded, 0, 1},
+    {"render", "method", font_render, 2, 0},
+    {"getWidth", "method", font_getWidth, 2, 0},
+    {"getHeight", "method", font_getHeight, 1, 0},
+    {"tostring", "method", font_tostring, 1, 0},
+    {}
+};
+
+pub fn micro_open_Font(T : tea_State*) : void
+{
+    tea_create_class(T, "Font", freg);
+    tea_push_value(T, -1);
+    tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Font");
+}

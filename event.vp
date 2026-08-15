@@ -1,0 +1,289 @@
+from tea import *
+from gleq import *
+from spxe import spxeMousePos, spxeGetWindow
+from glfw3 import *
+
+/* Start from 32 */
+let key_names1 : const uint8*[] = {
+    "space",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "'",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    ",",
+    "-",
+    ".",
+    "/",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "unknown",
+    ";",
+    "unknown",
+    "=",
+    "unknown",
+    "unknown",
+    "unknown",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "k",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "q",
+    "r",
+    "s",
+    "t",
+    "u",
+    "v",
+    "w",
+    "x",
+    "y",
+    "z",
+    "[",
+    "\\",
+    "]",
+    "unknown",
+    "unknown",
+    "`",
+};
+
+/* Start from 256 */
+let key_names2 : const uint8*[] = {
+    "escape",
+    "enter",
+    "tab",
+    "backspace",
+    "insert",
+    "delete",
+    "right",
+    "left",
+    "down",
+    "up",
+    "pageup",
+    "pagedown",
+    "home",
+    "end",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "capslock",
+    "scroll",
+    "numlock",
+    "print",
+    "pause",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "unknown",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
+    "f13",
+    "f14",
+    "f15",
+    "f16",
+    "f17",
+    "f18",
+    "f19",
+    "f20",
+    "f21",
+    "f22",
+    "f23",
+    "f24",
+    "f25",
+};
+
+let mouse_names : const uint8*[] = {
+    "left",
+    "right",
+    "middle",
+    "button4",
+    "button5",
+    "button6",
+    "button7",
+    "button8",
+};
+
+fn micro_key_filter(key : int32) : const uint8*
+{
+    if key >= GLFW_KEY_SPACE and key <= GLFW_KEY_GRAVE_ACCENT
+        return key_names1[key - GLFW_KEY_SPACE];
+    else if key >= GLFW_KEY_ESCAPE and key <= GLFW_KEY_F25
+        return key_names2[key - GLFW_KEY_ESCAPE];
+    else
+        return "unknown";
+}
+
+fn utf32_to_utf8(utf32 : uint32, utf8 : uint8*) : int32
+{
+    if utf32 < 0x80
+    {
+        utf8[0] = intcast(uint8, utf32);
+        return 1;
+    }
+    else if utf32 < 0x800
+    {
+        utf8[0] = intcast(uint8, 0xC0 | (utf32 >> 6));
+        utf8[1] = intcast(uint8, 0x80 | (utf32 & 0x3F));
+        return 2;
+    }
+    else if utf32 < 0x10000
+    {
+        utf8[0] = intcast(uint8, 0xE0 | (utf32 >> 12));
+        utf8[1] = intcast(uint8, 0x80 | ((utf32 >> 6) & 0x3F));
+        utf8[2] = intcast(uint8, 0x80 | (utf32 & 0x3F));
+        return 3;
+    }
+    else if utf32 < 0x110000
+    {
+        utf8[0] = intcast(uint8, 0xF0 | (utf32 >> 18));
+        utf8[1] = intcast(uint8, 0x80 | ((utf32 >> 12) & 0x3F));
+        utf8[2] = intcast(uint8, 0x80 | ((utf32 >> 6) & 0x3F));
+        utf8[3] = intcast(uint8, 0x80 | (utf32 & 0x3F));
+        return 4;
+    }
+    return 0; // Invalid Unicode code point
+}
+
+fn event_poll(T : tea_State*) : void
+{
+    // Create event list
+    tea_new_list(T, 0);
+
+    // Poll events
+    let e : GLEQevent;
+    while gleqNextEvent(&e)
+    {
+        tea_new_map(T);
+
+        switch e.tt
+        case GLEQtype::GLEQ_WINDOW_CLOSED
+        {
+            tea_push_lstring(T, "quit", 4);
+            tea_set_key(T, -2, "type");
+        }
+        case GLEQtype::GLEQ_CURSOR_MOVED
+        {
+            let x : int32;
+            let y : int32;
+            spxeMousePos(&x, &y, e.pos.x, e.pos.y);
+
+            tea_push_lstring(T, "mousemove", 9);
+            tea_set_key(T, -2, "type");
+            tea_push_number(T, floatcast(tea_Number, x));
+            tea_set_key(T, -2, "x");
+            tea_push_number(T, floatcast(tea_Number, y));
+            tea_set_key(T, -2, "y");
+        }
+        case GLEQtype::GLEQ_BUTTON_PRESSED
+        {
+            tea_push_lstring(T, "mousedown", 9);
+            tea_set_key(T, -2, "type");
+            tea_push_string(T, mouse_names[e.mouse.button]);
+            tea_set_key(T, -2, "button");
+        }
+        case GLEQtype::GLEQ_BUTTON_RELEASED
+        {
+            tea_push_lstring(T, "mouseup", 7);
+            tea_set_key(T, -2, "type");
+            tea_push_string(T, mouse_names[e.mouse.button]);
+            tea_set_key(T, -2, "button");
+        }
+        case GLEQtype::GLEQ_KEY_PRESSED
+        {
+            tea_push_lstring(T, "keydown", 7);
+            tea_set_key(T, -2, "type");
+            tea_push_string(T, micro_key_filter(e.keyboard.key));
+            tea_set_key(T, -2, "key");
+        }
+        case GLEQtype::GLEQ_KEY_RELEASED
+        {
+            tea_push_lstring(T, "keyup", 5);
+            tea_set_key(T, -2, "type");
+            tea_push_string(T, micro_key_filter(e.keyboard.key));
+            tea_set_key(T, -2, "key");
+        }
+        case GLEQtype::GLEQ_CODEPOINT_INPUT
+        {
+            let utf8 : uint8[5] = {};
+            let len : int32 = utf32_to_utf8(e.codepoint, utf8);
+            if(len > 0)
+            {
+                tea_push_lstring(T, "textinput", 9);
+                tea_set_key(T, -2, "type");
+                tea_push_lstring(T, utf8, intcast(usize, len));
+                tea_set_key(T, -2, "text");
+            }
+        }
+
+        gleqFreeEvent(&e);
+
+        // Add event to events list
+        tea_add_item(T, -2);
+    }
+}
+
+fn event_pump(T : tea_State*) : void
+{
+    glfwPollEvents();
+}
+
+fn event_quit(T : tea_State*) : void
+{
+    let window : GLFWwindow* = spxeGetWindow();
+    glfwSetWindowShouldClose(window, GLFW_TRUE);
+}
+
+let ereg : tea_Reg[] = {
+    {"poll", event_poll, 0, 0},
+    {"pump", event_pump, 0, 0},
+    {"quit", event_quit, 0, 0},
+    {}
+};
+
+pub fn micro_open_event(T : tea_State*) : void
+{
+    tea_create_submodule(T, "event", ereg);
+}

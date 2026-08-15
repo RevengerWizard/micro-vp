@@ -1,0 +1,169 @@
+import std::io as io
+import std::os as os
+import std::str as str
+
+from glfw3 import *
+from windows import *
+from spxe import *
+from tea import *
+from gleq import *
+
+from event import micro_open_event
+from window import micro_open_window
+from timer import micro_open_timer
+from gfx import micro_open_gfx
+from font import micro_open_Font
+from data import micro_open_Data
+from image import micro_open_Image
+from sera import sr_Buffer
+
+pub def WIDTH = 200;
+pub def HEIGHT = 200;
+
+pub var pixbuf : Px*?;
+pub var screen : sr_Buffer*?;
+
+let mreg : tea_Reg[] = {
+    //{ "isVisible", mouse_isVisible, 0, 0 },
+    //{ "setVisible", mouse_setVisible, 1, 0 },
+    //{ "setPosition", mouse_setPosition, 2, 0 },
+    {}
+};
+
+fn micro_open_mouse(T : tea_State*) : void
+{
+    tea_create_submodule(T, "mouse", mreg);
+}
+
+fn micro_open_keyboard(T : tea_State*) : void
+{
+    tea_create_submodule(T, "keyboard", nil);
+}
+
+struct Mods
+{
+    name : const uint8*;
+    f : fn(tea_State*) : void;
+}
+let mods : Mods[] = {
+    // Objects
+    {"Data", micro_open_Data},
+    {"Image", micro_open_Image},
+    {"Font", micro_open_Font},
+    // Modules
+    {"keyboard", micro_open_keyboard},
+    {"mouse", micro_open_mouse},
+    {"event", micro_open_event},
+    {"timer", micro_open_timer},
+    {"window", micro_open_window},
+    {"gfx", micro_open_gfx},
+    {}
+};
+
+/*
+* Init embedded scripts
+* -- these should be ordered in the array in the order we want them loaded;
+* init.tea should always be last since it depends on all the other modules
+*/
+struct Items
+{
+    name : const uint8*;
+    //data : const uint8*;
+    //size : usize;
+}
+let items : Items[] = {
+    {"graphics.tea"},
+    {"mouse.tea"},
+    {"timer.tea"},
+    {"init.tea"},
+    {}
+};
+
+fn micro_open(T : tea_State*) : bool
+{
+    tea_new_module(T, "micro");
+    for var i : uint32 = 0; mods[i].name != nil; i++
+    {
+        mods[i].f(T);
+        tea_set_attr(T, -2, mods[i].name);
+    }
+    tea_set_global(T, "micro");
+
+    for var i : uint32 = 0; items[i].name != nil; i++
+    {
+        if tea_load_file(T, items[i].name, nil) != TEA_OK or tea_pcall(T, 0) != TEA_OK
+        {
+            let size : usize;
+            let str : const uint8* = tea_to_lstring(T, -1, &size);
+            io::write(io::stderr, str, size, nil);
+            io::write(io::stderr, "\n", 1, nil);
+            return false;
+        }
+    }
+    return true;
+}
+
+pub fn main() : int32
+{
+    io::init();
+
+    io::write(io::stdout, "=== GL Pixel Buffer Rendering Example ===\n", 42, nil);
+
+    let T : tea_State* = tea_new_state(nil, nil);
+
+    if not micro_open(T)
+    {
+        os::exit(2);
+        return 2;
+    }
+
+    let window : GLFWwindow* = spxeGetWindow();
+    gleqTrackWindow(window);
+
+    io::write(io::stdout, "Starting render loop...\n", 24, nil);
+
+    // Do main loop
+    var last : float64 = 0.0;
+    while spxeStep()
+    {
+        if tea_get_global(T, "micro")
+        {
+            tea_get_attr(T, -1, "run");
+            if tea_pcall(T, 0) != TEA_OK
+            {
+                let size : usize;
+                let str : const uint8* = tea_to_lstring(T, -1, &size);
+                io::write(io::stderr, str, size, nil);
+                io::write(io::stderr, "\n", 1, nil);
+                break;
+            }
+            if (tea_get_type(T, -1) == TEA_TYPE_NUMBER) and tea_get_number(T, -1) == float64(1.0)
+                break;
+            tea_pop(T, 1);
+        }
+
+        spxeRender(pixbuf);
+
+        // Wait for next frame
+        let step : float64 = 1.0 / 60.0;
+        let now : float64 = glfwGetTime();
+        let wait : float64 = step - (now - last);
+        last += step;
+        if wait > float64(0.0)
+        {
+            Sleep(intcast(DWORD, wait * float64(1000.0)));
+        }
+        else
+        {
+            last = now;
+        }
+    }
+
+    io::write(io::stdout, "Cleaning up...\n", 15, nil);
+
+    tea_close(T);
+
+    let res : int32 = spxeEnd(pixbuf);
+    os::exit(intcast(uint32, res));
+    return 0;
+}

@@ -1,0 +1,25 @@
+import std::mem as mem
+import std::io as io
+from std::io import SeekPos, FILE, OpenMode
+
+pub fn fs_read(filename : const uint8*, len : usize*) : void*?
+{
+    let f : FILE*? = io::open(filename, OpenMode::READ, nil);
+    if f == nil return nil;
+
+    let size : usize = io::seek(f, 0, SeekPos::END, nil);
+    io::seek(f, 0, SeekPos::SET, nil);
+
+    let buf : void* = mem::alloc(size);
+    if buf == nil
+    {
+        io::close(f, nil);
+        return nil;
+    }
+
+    io::read(f, ptrcast(uint8*, buf), size, nil);
+    io::close(f, nil);
+
+    if len != nil { *len = size; }
+    return buf;
+}

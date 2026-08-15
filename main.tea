@@ -1,0 +1,152 @@
+print("top")
+
+const width = 200
+const height = 200
+
+var dx = 0
+var dy = 0
+
+var d;
+var img;
+var img2;
+
+var font;
+var font2
+
+function micro.load()
+{
+    print('loading')
+    //micro.event.quit()
+    micro.window.setTitle("a very funny title title")
+    print("timer", micro.timer.getTime())
+    //micro.gfx.setClearColor(155, 155, 155)
+    d = micro.Data.fromString('hello world from Data\n\0')
+    print(d)
+    img = micro.Image.fromBlank(25, 25)
+    print(img, img.getWidth(), img.getHeight())
+    img.clear(255, 255, 255)
+    for var y = 0; y < img.getHeight(); y += 1
+    {
+        for var x = 0; x < img.getWidth(); x += 1
+        {
+            var cx = x - img.getWidth() / 2
+            var cy = y - img.getHeight() / 2
+
+            var r = (x * 255) / img.getWidth()
+            var g = (y * 255) / img.getHeight()
+
+            var dist = cx * cx + cy * cy
+            var b = 255 - (dist * 255) / 300
+
+            if b < 0
+                {b = 0}
+
+            img.setPixel(x, y, r, g, b, 255)
+        }
+    }
+
+    img2 = micro.Image.fromFile('wizard_red_staff.png')
+    //img2 = micro.Image.fromBlank(28, 20)
+    //img2.clear(255, 255, 255)
+    print(img2, img2.getWidth(), img2.getHeight())
+
+    font2 = micro.Font.fromFile('font.ttf', 8)
+    font = micro.Font.fromFile('micro.ttf', 8)
+    print(font)
+    micro.gfx.setFont(font)
+}
+
+function micro.update(dt)
+{
+    //print('updating', dt)
+    //print('fps', micro.timer.getFps())
+}
+
+function circle(cx, cy, r)
+{
+    for var y = 0; y < height; y += 1
+    {
+        for var x = 0; x < width; x += 1
+        {
+            var dx = x - cx;
+            var dy = y - cy;
+
+            if dx * dx + dy * dy < r * r
+            {
+                micro.gfx.pixel(x, y, 255, 100, 100, 255);
+            }
+        }
+    }
+}
+
+function micro.draw()
+{
+    var cx = width/2;
+    var cy = height/2;
+    var r = 60;
+
+    //micro.gfx.setColor(200, 200, 200)
+    micro.gfx.circle('fill', cx, cy, r, 255, 100, 100, 255)
+    //micro.gfx.setColor()
+
+    //circle(cx, cy, r)
+
+    micro.gfx.screen.setPixel(165, 34, 255, 255, 0)
+
+    micro.gfx.draw(img2, 80, 140)
+
+    micro.gfx.draw(img, 170, 170, nil, 50)
+    //micro.gfx.draw(img, 160, 160, nil, 50, 4, 4)
+
+    micro.gfx.pixel(dx, dy, 255, 100, 100, 255);
+
+    micro.gfx.circle('line', 10, 10, 10)
+    micro.gfx.circle('fill', 120, 10, 10)
+    micro.gfx.line(2, 54, 45, 8, 255, 55, 55)
+    micro.gfx.rect('fill', 10, 10, 100, 50)
+    micro.gfx.rect('line', 10, 110, 100, 50)
+
+    micro.gfx.print('hello!', dx + 2, dy + 2)
+    micro.gfx.setFont(font2)
+    micro.gfx.print('The five boxing wizards\njump quickly!', 81, 75)
+    micro.gfx.setFont(font)
+}
+
+function micro.quit()
+{
+    print('quitting')
+}
+
+function micro.mousedown(e)
+{
+    print(e)
+}
+
+function micro.textinput(e)
+{
+    print('text = ', e)
+}
+
+var f = false
+
+function micro.keydown(e)
+{
+    print('keydown = ', e)
+    if e == 'f'
+    {
+        f = not f
+        micro.window.setFullscreen(f);
+    }
+}
+
+function micro.keyup(e)
+{
+    print('keyup = ', e)
+}
+
+function micro.mousemove(x, y)
+{
+    print('move ', x, y)
+    dx = x
+    dy = y
+}

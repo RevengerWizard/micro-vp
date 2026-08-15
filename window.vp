@@ -1,0 +1,44 @@
+from glfw3 import *
+from tea import *
+from spxe import spxeGetWindow, spxeSetFullscreen
+
+/*fn window_setSize(T : tea_State*) : void
+{
+    let window : GLFWwindow* = spxeGetWindow();
+    let width : int32 = tea_check_integer(T, 0);
+    let height : int32 = tea_check_integer(T, 1);
+    glfwSetWindowSize(window, width, height);
+}*/
+
+fn window_setTitle(T : tea_State*) : void
+{
+    let window : GLFWwindow* = spxeGetWindow();
+    let title : const uint8* = tea_check_string(T, 0);
+    glfwSetWindowTitle(window, title);
+}
+
+fn window_getTitle(T : tea_State*) : void
+{
+    let window : GLFWwindow* = spxeGetWindow();
+    let title : const uint8* = glfwGetWindowTitle(window);
+    tea_push_string(T, title);
+}
+
+fn window_setFullscreen(T : tea_State*) : void
+{
+    let b : bool = tea_check_bool(T, 0);
+    spxeSetFullscreen(b);
+}
+
+let wreg : const tea_Reg[] = {
+    //{"setSize", window_setSize, 2, 0},
+    {"setTitle", window_setTitle, 1, 0},
+    {"getTitle", window_getTitle, 0, 0},
+    {"setFullscreen", window_setFullscreen, 1, 0},
+    {}
+};
+
+pub fn micro_open_window(T : tea_State*) : void
+{
+    tea_create_submodule(T, "window", wreg);
+}

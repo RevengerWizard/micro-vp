@@ -1,0 +1,35 @@
+struct Wav
+{
+    data : const void*;
+    bitdepth : int32;
+    samplerate : int32;
+    channels : int32;
+    len : usize;
+}
+
+pub def WAV_ESUCCESS = 0;
+pub def WAV_EFAILURE = -1;
+pub def WAV_EBADHEADER = -2;
+pub def WAV_EBADFMT = -3;
+pub def WAV_ENOFMT = -4;
+pub def WAV_ENODATA = -5;
+pub def WAV_ENOSUPPORT = -6;
+
+pub fn wav_read(w : Wav*, data : const void*, len : usize) : int32
+{
+
+}
+
+pub fn wav_strerr(err : int32) : const uint8*
+{
+    switch err
+    case WAV_ESUCCESS return "success";
+    case WAV_EFAILURE return "failure";
+    case WAV_EBADHEADER return "bad header data";
+    case WAV_EBADFMT return "bad fmt data";
+    case WAV_ENOFMT return "missing 'fmt' subchunk";
+    case WAV_ENODATA return "missing 'data' subchunk";
+    case WAV_ENOSUPPORT return  "unsupported format; "
+                                "expected uncompressed PCM";
+    default return "unknown error";
+}

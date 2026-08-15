@@ -1,0 +1,1674 @@
+// stb_image - v2.02 - public domain image loader - http://nothings.org/stb_image.h
+//                                     no warranty implied; use at your own risk
+//
+// PNG-only version adapted for Viper
+
+import std::mem as mem
+import std::io as io
+
+// DOCUMENTATION
+//
+// Limitations:
+//    - no 16-bit-per-channel PNG
+//    - no 12-bit-per-channel JPEG
+//    - no JPEGs with arithmetic coding
+//    - no 1-bit BMP
+//    - GIF always returns *comp=4
+//
+// Basic usage:
+//    var x, y, n : int32;
+//    var data : uint8* = stbi_load("filename.png", &x, &y, &n, 0);
+//    // ... process data if not NULL ...
+//    // ... x = width, y = height, n = # 8-bit components per pixel ...
+//    stbi_image_free(data)
+//
+// Standard parameters:
+//    int32* x       -- outputs image width in pixels
+//    int32* y       -- outputs image height in pixels
+//    int32* comp    -- outputs # of image components in image file
+//    int32 req_comp -- if non-zero, # of image components requested in result
+
+pub def STBI_default = 0;
+pub def STBI_grey = 1;
+pub def STBI_grey_alpha = 2;
+pub def STBI_rgb = 3;
+pub def STBI_rgb_alpha = 4;
+
+alias stbi_uc = uint8;
+
+struct stbi_io_callbacks
+{
+    read : fn?(user : void*, data : uint8*, size : int32) : int32;
+    skip : fn(user : void*, n : int32) : void;
+    eof  : fn(user : void*) : int32;
+}
+
+struct stbi__context
+{
+    img_x, img_y : uint32;
+    img_n, img_out_n : int32;
+
+    io : stbi_io_callbacks;
+    io_user_data : void*;
+
+    read_from_callbacks : int32;
+    buflen : int32;
+    buffer_start : uint8[128];
+
+    img_buffer, img_buffer_end, img_buffer_original : uint8*;
+}
+
+// Global failure reason (not threadsafe)
+var stbi__g_failure_reason : uint8*? = nil;
+
+// ZLIB client - used by PNG
+struct stbi__zhuffman
+{
+    fast : uint16[1 << 9];
+    firstcode : uint16[16];
+    maxcode : int32[17];
+    firstsymbol : uint16[16];
+    size : uint8[288];
+    value : uint16[288];
+}
+
+struct stbi__zbuf
+{
+    zbuffer, zbuffer_end : uint8*;
+    num_bits : int32;
+    code_buffer : uint32;
+
+    zout : uint8*;
+    zout_start : uint8*;
+    zout_end : uint8*;
+    z_expandable : int32;
+
+    z_length, z_distance : stbi__zhuffman;
+}
+
+struct stbi__pngchunk
+{
+    length : uint32;
+    tt : uint32;    // 'type' is a reserved word in Viper
+}
+
+struct stbi__png
+{
+    s : stbi__context*;
+    idata, expanded, out : uint8*?;
+}
+
+// Static tables
+var stbi__zdefault_length : uint8[288];
+var stbi__zdefault_distance : uint8[32];    // FIX: was uint32[32]; must be uint8 to match sizelist convention
+var stbi__depth_scale_table : uint8[9] = {0, 0xff, 0x55, 0, 0x11, 0, 0, 0, 0x01};
+
+var stbi__unpremultiply_on_load : int32 = 0;
+var stbi__de_iphone_flag : int32 = 0;
+
+// Memory management
+fn stbi__malloc(size : usize) : void*
+{
+    return mem::alloc(size);
+}
+
+fn stbi_image_free(retval_from_stbi_load : void*) : void
+{
+    mem::free(retval_from_stbi_load);
+}
+
+// Error handling
+fn stbi__err(str : uint8*) : int32
+{
+    stbi__g_failure_reason = str;
+    return 0;
+}
+
+fn stbi__errpuc(str : uint8*, str2 : uint8*) : uint8*?
+{
+    stbi__g_failure_reason = str;
+    return nil;
+}
+
+pub fn stbi_failure_reason() : uint8*
+{
+    return stbi__g_failure_reason;
+}
+
+// Helper functions
+inline fn stbi__bitreverse16(n : int32) : int32
+{
+    var n2 : int32 = n;
+    n2 = ((n2 & 0xAAAA) >> 1) | ((n2 & 0x5555) << 1);
+    n2 = ((n2 & 0xCCCC) >> 2) | ((n2 & 0x3333) << 2);
+    n2 = ((n2 & 0xF0F0) >> 4) | ((n2 & 0x0F0F) << 4);
+    n2 = ((n2 & 0xFF00) >> 8) | ((n2 & 0x00FF) << 8);
+    return n2;
+}
+
+inline fn stbi__bit_reverse(v : int32, bits : int32) : int32
+{
+    // STBI_ASSERT(bits <= 16);
+    // To bit reverse n bits, reverse 16 and shift
+    // e.g. 11 bits, bit reverse and shift away 5
+    return stbi__bitreverse16(v) >> (16 - bits);
+}
+
+def STBI__ZFAST_BITS = 9;
+def STBI__ZFAST_MASK = ((1 << STBI__ZFAST_BITS) - 1);
+
+// zlib-style huffman decoding
+fn stbi__zbuild_huffman(z : stbi__zhuffman*, sizelist : uint8*, num : int32) : int32
+{
+    var i : int32 = 0;
+    var k : int32 = 0;
+    var code : int32 = 0;
+    var next_code : int32[16];
+    var sizes : int32[17];
+
+    // DEFLATE spec for generating codes
+    //for i = 0; i < 16; i++ { next_code[i] = 0; }
+    //for i = 0; i < 17; i++ { sizes[i] = 0; }  // ????????
+    //mem::set(z.fast, 0, sizeof(typeof(z.fast)));
+
+    for i = 0; i < num; ++i
+    {
+        //sizes[sizelist[i] ] += 1;
+        let idx : usize = intcast(usize, sizelist[i]);
+        sizes[idx] += 1;
+    }
+    sizes[0] = 0;
+
+    code = 0;
+    for i = 1; i < 16; ++i
+    {
+        next_code[i] = code;
+        z.firstcode[i] = intcast(uint16, code);
+        z.firstsymbol[i] = intcast(uint16, k);
+        code = code + sizes[i];
+        if sizes[i] != 0
+        {
+            if code - 1 >= (1 << i) return stbi__err("bad codelengths");
+        }
+        z.maxcode[i] = code << (16 - i);    // Preshift for inner loop
+        code <<= 1;
+        k += sizes[i];
+    }
+    z.maxcode[16] = 0x10000;    // Sentinel
+
+    for i = 0; i < num; ++i
+    {
+        var s : int32 = intcast(int32, sizelist[i]);
+        if s != 0
+        {
+            var c : int32 = next_code[s] - intcast(int32, z.firstcode[s]) + intcast(int32, z.firstsymbol[s]);
+            var fastv : uint16 = intcast(uint16, (s << 9) | i);
+            z.size[c] = intcast(uint8, s);
+            z.value[c] = intcast(uint16, i);
+            if s <= STBI__ZFAST_BITS
+            {
+                var j : int32 = stbi__bit_reverse(next_code[s], s);
+                while j < (1 << STBI__ZFAST_BITS)
+                {
+                    z.fast[j] = fastv;
+                    j += (1 << s);
+                }
+            }
+            next_code[s] += 1;
+        }
+    }
+    return 1;
+}
+
+fn stbi__init_zdefaults() : void
+{
+    var i : int32;
+    for i = 0;   i <= 143; ++i { stbi__zdefault_length[i] = 8; }
+    for i = 144; i <= 255; ++i { stbi__zdefault_length[i] = 9; }
+    for i = 256; i <= 279; ++i { stbi__zdefault_length[i] = 7; }
+    for i = 280; i <= 287; ++i { stbi__zdefault_length[i] = 8; }
+
+    for i = 0; i <= 31; ++i { stbi__zdefault_distance[i] = 5; }
+}
+
+inline fn stbi__zget8(z : stbi__zbuf*) : uint8
+{
+    if z.zbuffer >= z.zbuffer_end return 0;
+    var val : uint8 = *z.zbuffer;
+    z.zbuffer++;
+    return val;
+}
+
+fn stbi__fill_bits(z : stbi__zbuf*) : void
+{
+    while true
+    {
+        // STBI_ASSERT(z.code_buffer < (1u32 << z.num_bits));
+        z.code_buffer |= intcast(uint32, stbi__zget8(z)) << intcast(uint32, z.num_bits);
+        z.num_bits += 8;
+        if z.num_bits > 24 break;
+    }
+}
+
+inline fn stbi__zreceive(z : stbi__zbuf*, n : int32) : uint32
+{
+    var k : uint32;
+    if z.num_bits < n { stbi__fill_bits(z); }
+    k = z.code_buffer & ((1 << intcast(uint32, n)) - 1);
+    z.code_buffer >>= intcast(uint32, n);
+    z.num_bits -= n;
+    return k;
+}
+
+fn stbi__zhuffman_decode_slowpath(a : stbi__zbuf*, z : stbi__zhuffman*) : int32
+{
+    var b : int32;
+    var s : int32;
+    var k : int32;
+    k = stbi__bit_reverse(intcast(int32, a.code_buffer), 16);
+    s = 9 + 1;
+    while true
+    {
+        if k < z.maxcode[s] break;
+        s += 1;
+    }
+    if s == 16 return -1;
+    b = (k >> (16 - s)) - intcast(int32, z.firstcode[s]) + intcast(int32, z.firstsymbol[s]);
+    a.code_buffer >>= intcast(uint32, s);
+    a.num_bits -= s;
+    return intcast(int32, z.value[b]);
+}
+
+inline fn stbi__zhuffman_decode(a : stbi__zbuf*, z : stbi__zhuffman*) : int32
+{
+    var b : int32;
+    var s : int32;
+    if a.num_bits < 16 { stbi__fill_bits(a); }
+    b = intcast(int32, z.fast[a.code_buffer & ((1u32 << 9u32) - 1)]);
+    if b != 0
+    {
+        s = b >> 9;
+        a.code_buffer >>= intcast(uint32, s);
+        a.num_bits -= s;
+        return b & 511;
+    }
+    return stbi__zhuffman_decode_slowpath(a, z);
+}
+
+// PNG decoder
+let stbi__png_sig : uint8[8] = {137, 80, 78, 71, 13, 10, 26, 10};
+
+fn stbi__check_png_header(s : stbi__context*) : int32
+{
+    var i : int32;
+    for i = 0; i < 8; ++i
+    {
+        // FIX: stbi__get8 returns uint8; stbi__png_sig[i] is uint8 — comparison is fine
+        if stbi__get8(s) != stbi__png_sig[i] return stbi__err("bad png sig");
+    }
+    return 1;
+}
+
+fn stbi__get_chunk_header(s : stbi__context*) : stbi__pngchunk
+{
+    var c : stbi__pngchunk;
+    c.length = stbi__get32be(s);
+    c.tt = stbi__get32be(s);
+    return c;
+}
+
+def STBI__F_none = 0;
+def STBI__F_sub = 1;
+def STBI__F_up = 2;
+def STBI__F_avg = 3;
+def STBI__F_paeth = 4;
+// synthetic filters used for first scanline to avoid needing a dummy row of 0s
+def STBI__F_avg_first = 5;
+def STBI__F_paeth_first = 6;
+
+let first_row_filter : stbi_uc[5] = {
+    intcast(uint8, STBI__F_none),
+    intcast(uint8, STBI__F_sub),
+    intcast(uint8, STBI__F_none),
+    intcast(uint8, STBI__F_avg_first),
+    intcast(uint8, STBI__F_paeth_first)
+};
+
+fn stbi__paeth(a : int32, b : int32, c : int32) : int32
+{
+    var p : int32 = a + b - c;
+    var pa : int32 = p - a; if pa < 0 { pa = -pa; }
+    var pb : int32 = p - b; if pb < 0 { pb = -pb; }
+    var pc : int32 = p - c; if pc < 0 { pc = -pc; }
+    if pa <= pb and pa <= pc return a;
+    if pb <= pc return b;
+    return c;
+}
+
+// Create the PNG data from post-deflated data
+fn stbi__create_png_image_raw(a : stbi__png*, raw : uint8*, raw_len : uint32, out_n : int32, x : uint32, y : uint32, depth : int32, color : int32) : int32
+{
+    var s : stbi__context* = a.s;
+    var i : uint32;
+    var j : uint32;
+    var stride : uint32 = x * intcast(uint32, out_n);
+    var img_len : uint32;
+    var img_width_bytes : uint32;
+    var k : int32;
+    var img_n : int32 = s.img_n;   // Copy it into a local for later
+
+    a.out = ptrcast(uint8*, stbi__malloc(intcast(usize, x) * intcast(usize, y) * intcast(usize, out_n)));
+    if a.out == nil return stbi__err("outofmem");
+
+    img_width_bytes = (intcast(uint32, img_n) * x * intcast(uint32, depth) + 7u32) >> 3;
+    img_len = (img_width_bytes + 1) * y;
+    if s.img_x == x and s.img_y == y
+    {
+        if raw_len != img_len return stbi__err("not enough pixels");
+    }
+    else
+    {
+        // interlaced
+        if raw_len < img_len return stbi__err("not enough pixels");
+    }
+
+    for j = 0; j < y; ++j
+    {
+        var cur : uint8* = ptrcast(uint8*, a.out + intcast(usize, stride) * intcast(usize, j));
+        var prior : uint8* = cur - intcast(usize, stride);
+        var filter : int32 = intcast(int32, *raw); raw++;
+        var filter_bytes : int32 = img_n;
+        var width : int32 = intcast(int32, x);
+        if filter > 4 return stbi__err("invalid filter");
+
+        if depth < 8
+        {
+            // store output to the rightmost img_width_bytes, decode in place
+            let cur2 : uint8* = ptrcast(uint8*, cur + (intcast(usize, x) * intcast(usize, out_n) - intcast(usize, img_width_bytes)));
+            cur = cur2;
+            filter_bytes = 1;
+            width = intcast(int32, img_width_bytes);
+        }
+
+        // if first row, use special filter that doesn't sample previous row
+        if j == 0 { filter = intcast(int32, first_row_filter[filter]); }
+
+        // handle first byte explicitly
+        for k = 0; k < filter_bytes; ++k
+        {
+            switch filter
+            case STBI__F_none        { cur[k] = raw[k]; }
+            case STBI__F_sub         { cur[k] = raw[k]; }
+            case STBI__F_up          { cur[k] = intcast(uint8, intcast(int32, raw[k]) + intcast(int32, prior[k])); }
+            case STBI__F_avg         { cur[k] = intcast(uint8, intcast(int32, raw[k]) + (intcast(int32, prior[k]) >> 1)); }
+            case STBI__F_paeth       { cur[k] = intcast(uint8, intcast(int32, raw[k]) + stbi__paeth(0, intcast(int32, prior[k]), 0)); }
+            case STBI__F_avg_first   { cur[k] = raw[k]; }
+            case STBI__F_paeth_first { cur[k] = raw[k]; }
+        }
+
+        if depth == 8
+        {
+            if img_n != out_n { cur[img_n] = 255; } // First pixel
+            raw = raw + img_n;
+            cur = cur + out_n;
+            prior = prior + out_n;
+        }
+        else
+        {
+            raw++;
+            cur++;
+            prior++;
+        }
+
+        // bulk filter pass — don't switch per-pixel
+        if depth < 8 or img_n == out_n
+        {
+            var nk : int32 = (width - 1) * img_n;
+            switch filter
+            case STBI__F_none { mem::copy(cur, raw, intcast(usize, nk)); }
+            case STBI__F_sub
+            {
+                // cur[k - filter_bytes] with k starting at 0: negative index.
+                // Viper promotes array indices to usize (unsigned), so -filter_bytes wraps
+                // to a huge offset and crashes. Use an explicit back-pointer instead.
+                var prev : uint8* = cur - intcast(usize, filter_bytes);
+                for k = 0; k < nk; ++k
+                {
+                    cur[k] = intcast(uint8, intcast(int32, raw[k]) + intcast(int32, prev[k]));
+                }
+            }
+            case STBI__F_up
+            {
+                for k = 0; k < nk; ++k
+                {
+                    cur[k] = intcast(uint8, intcast(int32, raw[k]) + intcast(int32, prior[k]));
+                }
+            }
+            case STBI__F_avg
+            {
+                var prev : uint8* = cur - intcast(usize, filter_bytes);
+                for k = 0; k < nk; ++k
+                {
+                    cur[k] = intcast(uint8, intcast(int32, raw[k]) + ((intcast(int32, prior[k]) + intcast(int32, prev[k])) >> 1));
+                }
+            }
+            case STBI__F_paeth
+            {
+                // Same issue: both cur[k-filter_bytes] and prior[k-filter_bytes] need back-pointers
+                var prev    : uint8* = cur   - intcast(usize, filter_bytes);
+                var priorpv : uint8* = prior - intcast(usize, filter_bytes);
+                for k = 0; k < nk; ++k
+                {
+                    cur[k] = intcast(uint8, intcast(int32, raw[k]) + stbi__paeth(intcast(int32, prev[k]), intcast(int32, prior[k]), intcast(int32, priorpv[k])));
+                }
+            }
+            case STBI__F_avg_first
+            {
+                var prev : uint8* = cur - intcast(usize, filter_bytes);
+                for k = 0; k < nk; ++k
+                {
+                    cur[k] = intcast(uint8, intcast(int32, raw[k]) + (intcast(int32, prev[k]) >> 1));
+                }
+            }
+            case STBI__F_paeth_first
+            {
+                var prev : uint8* = cur - intcast(usize, filter_bytes);
+                for k = 0; k < nk; ++k
+                {
+                    cur[k] = intcast(uint8, intcast(int32, raw[k]) + stbi__paeth(intcast(int32, prev[k]), 0, 0));
+                }
+            }
+            raw = raw + nk;
+        }
+        else
+        {
+            // img_n + 1 == out_n: interleave alpha = 255
+            // FIX: use int32 for loop counter — uint32 wraps past 0 causing infinite loop / OOB crash
+            // cur[k - out_n] with k starting at 0: same unsigned-wrap crash as above.
+            // Hoist the back-pointer before the inner loop.
+            var ii : int32 = intcast(int32, x) - 1;
+            while ii >= 1
+            {
+                var prev    : uint8* = cur   - intcast(usize, out_n);
+                var priorpv : uint8* = prior - intcast(usize, out_n);
+                for k = 0; k < img_n; ++k
+                {
+                    switch filter
+                    case STBI__F_none        { cur[k] = raw[k]; }
+                    case STBI__F_sub         { cur[k] = intcast(uint8, intcast(int32, raw[k]) + intcast(int32, prev[k])); }
+                    case STBI__F_up          { cur[k] = intcast(uint8, intcast(int32, raw[k]) + intcast(int32, prior[k])); }
+                    case STBI__F_avg         { cur[k] = intcast(uint8, intcast(int32, raw[k]) + ((intcast(int32, prior[k]) + intcast(int32, prev[k])) >> 1)); }
+                    case STBI__F_paeth       { cur[k] = intcast(uint8, intcast(int32, raw[k]) + stbi__paeth(intcast(int32, prev[k]), intcast(int32, prior[k]), intcast(int32, priorpv[k]))); }
+                    case STBI__F_avg_first   { cur[k] = intcast(uint8, intcast(int32, raw[k]) + (intcast(int32, prev[k]) >> 1)); }
+                    case STBI__F_paeth_first { cur[k] = intcast(uint8, intcast(int32, raw[k]) + stbi__paeth(intcast(int32, prev[k]), 0, 0)); }
+                }
+                cur[img_n] = 255;
+                raw = raw + img_n;
+                cur = cur + out_n;
+                prior = prior + out_n;
+                ii -= 1;
+            }
+        }
+    }
+
+    // expand bits to pixels for sub-8-bit depths
+    if depth < 8
+    {
+        for j = 0; j < y; ++j
+        {
+            var cur : uint8* = ptrcast(uint8*, a.out + intcast(usize, stride) * intcast(usize, j));
+            var inn : uint8* = ptrcast(uint8*, a.out + intcast(usize, stride) * intcast(usize, j) + intcast(usize, x) * intcast(usize, out_n) - intcast(usize, img_width_bytes));
+            var scale : uint8 = 1;
+            if color == 0 { scale = stbi__depth_scale_table[depth]; }
+
+            if depth == 4
+            {
+                var k2 : uint32 = x * intcast(uint32, img_n);
+                while k2 >= 2
+                {
+                    // FIX: scale * (uint8 shift expr) — both uint8, product fits uint8 for scale<=0xff and val<=0xf
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn >> 4))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn & 0x0f))); cur++;
+                    inn++;
+                    k2 -= 2;
+                }
+                if (x * intcast(uint32, img_n)) & 1 != 0
+                {
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn >> 4))); cur++;
+                }
+            }
+            else if depth == 2
+            {
+                var k2 : uint32 = x * intcast(uint32, img_n);
+                while k2 >= 4
+                {
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn >> 6))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 4) & 0x03u8))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 2) & 0x03u8))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn & 0x03u8))); cur++;
+                    inn++;
+                    k2 -= 4;
+                }
+                // handle remaining pixels (up to 3)
+                if k2 > 0 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn >> 6))); cur++; }
+                if k2 > 1 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 4) & 0x03u8))); cur++; }
+                if k2 > 2 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 2) & 0x03u8))); cur++; }
+            }
+            else if depth == 1
+            {
+                var k2 : uint32 = x * intcast(uint32, img_n);
+                while k2 >= 8
+                {
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn >> 7))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 6) & 0x01))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 5) & 0x01))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 4) & 0x01))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 3) & 0x01))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 2) & 0x01))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 1) & 0x01))); cur++;
+                    *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn & 0x01u8))); cur++;
+                    inn++;
+                    k2 -= 8;
+                }
+                // handle remaining pixels (up to 7)
+                if k2 > 0 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, (*inn >> 7))); cur++; }
+                if k2 > 1 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 6) & 0x01u8))); cur++; }
+                if k2 > 2 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 5) & 0x01u8))); cur++; }
+                if k2 > 3 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 4) & 0x01u8))); cur++; }
+                if k2 > 4 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 3) & 0x01u8))); cur++; }
+                if k2 > 5 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 2) & 0x01u8))); cur++; }
+                if k2 > 6 { *cur = intcast(uint8, intcast(int32, scale) * intcast(int32, ((*inn >> 1) & 0x01u8))); cur++; }
+            }
+
+            if img_n != out_n
+            {
+                // insert alpha = 255 into expanded output
+                var cur2 : uint8* = ptrcast(uint8*, a.out + intcast(usize, stride) * intcast(usize, j));
+                if img_n == 1
+                {
+                    var i2 : int32 = intcast(int32, x) - 1;
+                    while i2 >= 0
+                    {
+                        cur2[i2*2 + 1] = 255;
+                        cur2[i2*2 + 0] = cur2[i2];
+                        i2 -= 1;
+                    }
+                }
+                else
+                {
+                    // img_n == 3
+                    var i2 : int32 = intcast(int32, x) - 1;
+                    while i2 >= 0
+                    {
+                        cur2[i2*4 + 3] = 255;
+                        cur2[i2*4 + 2] = cur2[i2*3 + 2];
+                        cur2[i2*4 + 1] = cur2[i2*3 + 1];
+                        cur2[i2*4 + 0] = cur2[i2*3 + 0];
+                        i2 -= 1;
+                    }
+                }
+            }
+        }
+    }
+
+    return 1;
+}
+
+fn stbi__create_png_image(a : stbi__png*, image_data : uint8*, image_data_len : uint32, out_n : int32, depth : int32, color : int32, interlaced : int32) : int32
+{
+    if interlaced == 0
+    {
+        return stbi__create_png_image_raw(a, image_data, image_data_len, out_n, a.s.img_x, a.s.img_y, depth, color);
+    }
+
+    // de-interlacing
+    var final : uint8* = ptrcast(uint8*, stbi__malloc(intcast(usize, a.s.img_x) * intcast(usize, a.s.img_y) * intcast(usize, out_n)));
+    var p : int32;
+    var xorig : int32[7] = {0,4,0,2,0,1,0};
+    var yorig : int32[7] = {0,0,4,0,2,0,1};
+    var xspc  : int32[7] = {8,8,4,4,2,2,1};
+    var yspc  : int32[7] = {8,8,8,4,4,2,2};
+
+    for p = 0; p < 7; ++p
+    {
+        var x : int32 = (intcast(int32, a.s.img_x) - xorig[p] + xspc[p] - 1) / xspc[p];
+        var y : int32 = (intcast(int32, a.s.img_y) - yorig[p] + yspc[p] - 1) / yspc[p];
+        if x != 0 and y != 0
+        {
+            var img_len : uint32 = (((intcast(uint32, a.s.img_n) * intcast(uint32, x) * intcast(uint32, depth) + 7) >> 3) + 1u32) * intcast(uint32, y);
+            if stbi__create_png_image_raw(a, image_data, image_data_len, out_n, intcast(uint32, x), intcast(uint32, y), depth, color) == 0
+            {
+                mem::free(final);
+                return 0;
+            }
+            for var j : int32 = 0; j < y; ++j
+            {
+                for var i2 : int32 = 0; i2 < x; ++i2
+                {
+                    var out_y : int32 = j * yspc[p] + yorig[p];
+                    var out_x : int32 = i2 * xspc[p] + xorig[p];
+                    mem::copy(
+                        ptrcast(void*, final + intcast(usize, out_y) * intcast(usize, a.s.img_x) * intcast(usize, out_n) + intcast(usize, out_x) * intcast(usize, out_n)),
+                        ptrcast(void*, a.out + (intcast(usize, j) * intcast(usize, x) + intcast(usize, i2)) * intcast(usize, out_n)),
+                        intcast(usize, out_n));
+                }
+            }
+            mem::free(a.out);
+            image_data = image_data + img_len;
+            image_data_len -= img_len;
+        }
+    }
+    a.out = final;
+
+    return 1;
+}
+
+def STBI__SCAN_load = 0;
+def STBI__SCAN_type = 1;
+def STBI__SCAN_header = 2;
+
+// macro STBI__PNG_TYPE(a,b,c,d) = (((a) << 24) + ((b) << 16) + ((c) << 8) + (d));
+
+fn stbi__parse_png_file(z : stbi__png*, scan : int32, req_comp : int32) : int32
+{
+    var palette : uint8[1024];
+    var pal_img_n : int32 = 0;
+    var tc : uint8[3];
+    var has_trans : int32 = 0;
+    var ioff : uint32 = 0;
+    var idata_limit : uint32 = 0;
+    var i : uint32;
+    var pal_len : uint32 = 0;
+    var first : int32 = 1;
+    var k : int32;
+    var interlace : int32 = 0;
+    var color : int32 = 0;
+    var depth : int32 = 0;
+    var is_iphone : int32 = 0;
+    var s : stbi__context* = z.s;
+
+    z.expanded = nil;
+    z.idata = nil;
+    z.out = nil;
+
+    if stbi__check_png_header(s) == 0 return 0;
+
+    if scan == STBI__SCAN_type return 1;
+
+    while true
+    {
+        var c : stbi__pngchunk = stbi__get_chunk_header(s);
+        switch c.tt
+
+        // CgBI (iPhone)
+        // case STBI__PNG_TYPE('C','g','B','I')
+        case (intcast(uint32, 'C') << 24) + (intcast(uint32, 'g') << 16) + (intcast(uint32, 'B') << 8) + intcast(uint32, 'I')
+        {
+            is_iphone = 1;
+            stbi__skip(s, intcast(int32, c.length));
+        }
+
+        // IHDR
+        // case STBI__PNG_TYPE('I','H','D','R')
+        case (intcast(uint32, 'I') << 24) + (intcast(uint32, 'H') << 16) + (intcast(uint32, 'D') << 8) + intcast(uint32, 'R')
+        {
+            var comp   : int32;
+            var filter : int32;
+            if first == 0 { return stbi__err("multiple IHDR"); }
+            first = 0;
+            if c.length != 13u32 { return stbi__err("bad IHDR len"); }
+            s.img_x = stbi__get32be(s);
+            if s.img_x > (1u32 << 24) { return stbi__err("too large"); }
+            s.img_y = stbi__get32be(s);
+            if s.img_y > (1u32 << 24) { return stbi__err("too large"); }
+            // FIX: stbi__get8 returns uint8; assign to int32 via intcast
+            depth = intcast(int32, stbi__get8(s));
+            if depth != 1 and depth != 2 and depth != 4 and depth != 8
+            {
+                return stbi__err("1/2/4/8-bit only");
+            }
+            color = intcast(int32, stbi__get8(s));
+            if color > 6 return stbi__err("bad ctype");
+            if color == 3 { pal_img_n = 3; }
+            else if (color & 1) != 0 return stbi__err("bad ctype");
+            comp   = intcast(int32, stbi__get8(s));
+            if comp != 0 return stbi__err("bad comp method");
+            filter = intcast(int32, stbi__get8(s));
+            if filter != 0 return stbi__err("bad filter method");
+            interlace = intcast(int32, stbi__get8(s));
+            if interlace > 1 return stbi__err("bad interlace method");
+            if s.img_x == 0u32 or s.img_y == 0u32 return stbi__err("0-pixel image");
+            if pal_img_n == 0
+            {
+                s.img_n = (color & 2 != 0 ? 3 : 1) + (color & 4 != 0 ? 1 : 0);
+                if intcast(uint32, 1 << 30) / s.img_x / intcast(uint32, s.img_n) < s.img_y
+                {
+                    return stbi__err("too large");
+                }
+                if scan == STBI__SCAN_header return 1;
+            }
+            else
+            {
+                s.img_n = 1;
+                if intcast(uint32, 1 << 30) / s.img_x / 4u32 < s.img_y
+                {
+                    return stbi__err("too large");
+                }
+                // if SCAN_header, need to scan for tRNS first
+            }
+        }
+
+        // PLTE
+        // case STBI__PNG_TYPE('P','L','T','E')
+        case (intcast(uint32, 'P') << 24) + (intcast(uint32, 'L') << 16) + (intcast(uint32, 'T') << 8) + intcast(uint32, 'E')
+        {
+            if first != 0 return stbi__err("first not IHDR");
+            if c.length > 256u32 * 3u32 return stbi__err("invalid PLTE");
+            pal_len = c.length / 3u32;
+            if pal_len * 3u32 != c.length return stbi__err("invalid PLTE");
+            for i = 0; i < pal_len; ++i
+            {
+                palette[i*4 + 0] = stbi__get8(s);
+                palette[i*4 + 1] = stbi__get8(s);
+                palette[i*4 + 2] = stbi__get8(s);
+                palette[i*4 + 3] = 255;
+            }
+        }
+
+        // tRNS
+        // case STBI__PNG_TYPE('t','R','N','S')
+        case (intcast(uint32, 't') << 24) + (intcast(uint32, 'R') << 16) + (intcast(uint32, 'N') << 8) + intcast(uint32, 'S')
+        {
+            if first != 0 return stbi__err("first not IHDR");
+            if z.idata != nil return stbi__err("tRNS after IDAT");
+            if pal_img_n != 0
+            {
+                if scan == STBI__SCAN_header { s.img_n = 4; return 1; }
+                if pal_len == 0u32 return stbi__err("tRNS before PLTE");
+                if c.length > pal_len return stbi__err("bad tRNS len");
+                pal_img_n = 4;
+                for i = 0; i < c.length; ++i
+                {
+                    palette[i*4 + 3] = stbi__get8(s);
+                }
+            }
+            else
+            {
+                if (s.img_n & 1) == 0 return stbi__err("tRNS with alpha");
+                if c.length != intcast(uint32, s.img_n) * 2u32 return stbi__err("bad tRNS len");
+                has_trans = 1;
+                for k = 0; k < s.img_n; ++k
+                {
+                    // FIX: stbi__get16be returns int32; mask to 8 bits; multiply with scale; cast back to uint8
+                    //      Use int32 arithmetic to avoid uint8 overflow before truncation
+                    var raw16 : int32 = stbi__get16be(s) & 255;
+                    tc[k] = intcast(uint8, raw16 * intcast(int32, stbi__depth_scale_table[depth]));
+                }
+            }
+        }
+
+        // IDAT
+        // case STBI__PNG_TYPE('I','D','A','T')
+        case (intcast(uint32, 'I') << 24) + (intcast(uint32, 'D') << 16) + (intcast(uint32, 'A') << 8) + intcast(uint32, 'T')
+        {
+            if first != 0 return stbi__err("first not IHDR");
+            if pal_img_n != 0 and pal_len == 0u32 return stbi__err("no PLTE");
+            if scan == STBI__SCAN_header { s.img_n = pal_img_n; return 1; }
+            if ioff + c.length > idata_limit
+            {
+                var p : uint8*;
+                if idata_limit == 0u32 { idata_limit = c.length > 4096u32 ? c.length : 4096u32; }
+                while ioff + c.length > idata_limit { idata_limit *= 2u32; }
+                p = ptrcast(uint8*, mem::realloc(z.idata, intcast(usize, idata_limit)));
+                if p == nil return stbi__err("outofmem");
+                z.idata = p;
+            }
+            if stbi__getn(s, z.idata + intcast(usize, ioff), intcast(int32, c.length)) == 0
+            {
+                return stbi__err("outofdata");
+            }
+            ioff += c.length;
+        }
+
+        // IEND
+        // case STBI__PNG_TYPE('I','E','N','D')
+        case (intcast(uint32, 'I') << 24) + (intcast(uint32, 'E') << 16) + (intcast(uint32, 'N') << 8) + intcast(uint32, 'D')
+        {
+            var raw_len : uint32;
+            var bpl : uint32;
+            if first != 0 return stbi__err("first not IHDR");
+            if scan != STBI__SCAN_load return 1;
+            if z.idata == nil return stbi__err("no IDAT");
+
+            bpl = (s.img_x * intcast(uint32, depth) + 7u32) / 8u32;   // bytes per line, per component
+            raw_len = bpl * s.img_y * intcast(uint32, s.img_n) + s.img_y;
+
+            // decode zlib stream
+            var outlen : int32 = 0;
+            z.expanded = stbi_zlib_decode_malloc_guesssize_headerflag(
+                z.idata, intcast(int32, ioff), intcast(int32, raw_len), &outlen,
+                is_iphone == 0 ? 1 : 0);
+            if z.expanded == nil return 0;
+            raw_len = intcast(uint32, outlen);
+            mem::free(z.idata);
+            z.idata = nil;
+
+            if (req_comp == s.img_n + 1 and req_comp != 3 and pal_img_n == 0) or has_trans != 0
+            {
+                s.img_out_n = s.img_n + 1;
+            }
+            else
+            {
+                s.img_out_n = s.img_n;
+            }
+
+            if stbi__create_png_image(z, z.expanded, raw_len, s.img_out_n, depth, color, interlace) == 0
+            {
+                return 0;
+            }
+
+            // compute transparency
+            if has_trans != 0
+            {
+                var pixel_count : uint32 = s.img_x * s.img_y;
+                var p : uint8* = z.out;
+                if s.img_out_n == 2
+                {
+                    for i = 0; i < pixel_count; ++i
+                    {
+                        p[1] = (p[0] == tc[0]) ? 0 : 255;
+                        p = p + 2;
+                    }
+                }
+                else
+                {
+                    for i = 0; i < pixel_count; ++i
+                    {
+                        if p[0] == tc[0] and p[1] == tc[1] and p[2] == tc[2]
+                        {
+                            p[3] = 0;
+                        }
+                        p = p + 4;
+                    }
+                }
+            }
+
+            // de-iPhone (BGRA -> RGBA)
+            if is_iphone != 0 and stbi__de_iphone_flag != 0 and s.img_out_n > 2
+            {
+                var pixel_count : uint32 = s.img_x * s.img_y;
+                var p : uint8* = z.out;
+                if s.img_out_n == 3
+                {
+                    for i = 0; i < pixel_count; ++i
+                    {
+                        var t : uint8 = p[0];
+                        p[0] = p[2];
+                        p[2] = t;
+                        p = p + 3;
+                    }
+                }
+                else
+                {
+                    if stbi__unpremultiply_on_load != 0
+                    {
+                        for i = 0; i < pixel_count; ++i
+                        {
+                            var a2 : uint8 = p[3];
+                            var t  : uint8 = p[0];
+                            if a2 != 0
+                            {
+                                // FIX: p[x] * 255 / a2 — use int32 arithmetic to avoid uint8 overflow
+                                p[0] = intcast(uint8, intcast(int32, p[2]) * 255 / intcast(int32, a2));
+                                p[1] = intcast(uint8, intcast(int32, p[1]) * 255 / intcast(int32, a2));
+                                p[2] = intcast(uint8, intcast(int32, t)    * 255 / intcast(int32, a2));
+                            }
+                            else
+                            {
+                                p[0] = p[2];
+                                p[2] = t;
+                            }
+                            p = p + 4;
+                        }
+                    }
+                    else
+                    {
+                        for i = 0; i < pixel_count; ++i
+                        {
+                            var t : uint8 = p[0];
+                            p[0] = p[2];
+                            p[2] = t;
+                            p = p + 4;
+                        }
+                    }
+                }
+            }
+
+            // expand palette
+            if pal_img_n != 0
+            {
+                s.img_n = pal_img_n;
+                s.img_out_n = pal_img_n;
+                if req_comp >= 3 { s.img_out_n = req_comp; }
+
+                var pixel_count : uint32 = s.img_x * s.img_y;
+                var orig : uint8* = z.out;
+                var temp_out : uint8* = ptrcast(uint8*, stbi__malloc(intcast(usize, pixel_count) * intcast(usize, s.img_out_n)));
+                if temp_out == nil return stbi__err("outofmem");
+
+                if s.img_out_n == 3
+                {
+                    for i = 0; i < pixel_count; ++i
+                    {
+                        // FIX: orig[i] is uint8; *4 yields uint8 overflow — cast to int32 first
+                        var n : int32 = intcast(int32, orig[i]) * 4;
+                        temp_out[i*3u32 + 0] = palette[n];
+                        temp_out[i*3u32 + 1] = palette[n+1];
+                        temp_out[i*3u32 + 2] = palette[n+2];
+                    }
+                }
+                else
+                {
+                    for i = 0; i < pixel_count; ++i
+                    {
+                        var n : int32 = intcast(int32, orig[i]) * 4;
+                        temp_out[i*4u32 + 0] = palette[n];
+                        temp_out[i*4u32 + 1] = palette[n+1];
+                        temp_out[i*4u32 + 2] = palette[n+2];
+                        temp_out[i*4u32 + 3] = palette[n+3];
+                    }
+                }
+                mem::free(z.out);
+                z.out = temp_out;
+            }
+
+            mem::free(z.expanded);
+            z.expanded = nil;
+            return 1;
+        }
+
+        default
+        {
+            if first != 0 return stbi__err("first not IHDR");
+            if (c.tt & (1u32 << 29)) == 0u32
+            {
+                return stbi__err("unknown PNG chunk type");
+            }
+            stbi__skip(s, intcast(int32, c.length));
+        }
+
+        // skip CRC at end of every chunk
+        stbi__get32be(s);
+    }
+    return -1;
+}
+
+fn stbi__do_png(p : stbi__png*, x : int32*, y : int32*, n : int32*, req_comp : int32) : uint8*?
+{
+    if req_comp < 0 or req_comp > 4 return stbi__errpuc("bad req_comp", "Internal error");
+
+    if stbi__parse_png_file(p, STBI__SCAN_load, req_comp) != 0
+    {
+        var result : uint8* = p.out;
+        p.out = nil;
+
+        if req_comp != 0 and req_comp != p.s.img_out_n
+        {
+            result = stbi__convert_format(result, p.s.img_out_n, req_comp, intcast(int32, p.s.img_x), intcast(int32, p.s.img_y));
+            p.s.img_out_n = req_comp;
+            if result == nil return nil;
+        }
+
+        if x != nil { *x = intcast(int32, p.s.img_x); }
+        if y != nil { *y = intcast(int32, p.s.img_y); }
+        if n != nil { *n = p.s.img_out_n; }
+        return result;
+    }
+
+    // cleanup on failure
+    if p.out != nil { mem::free(p.out);      p.out      = nil; }
+    if p.expanded != nil { mem::free(p.expanded);  p.expanded = nil; }
+    if p.idata != nil { mem::free(p.idata);     p.idata    = nil; }
+
+    return nil;
+}
+
+fn stbi__png_load(s : stbi__context*, x : int32*, y : int32*, comp : int32*, req_comp : int32) : uint8*
+{
+    var p : stbi__png;
+    p.s = s;
+    p.idata = nil;
+    p.expanded = nil;
+    p.out = nil;
+    return stbi__do_png(&p, x, y, comp, req_comp);
+}
+
+fn stbi__png_test(s : stbi__context*) : int32
+{
+    var r : int32 = stbi__check_png_header(s);
+    stbi__rewind(s);
+    return r;
+}
+
+fn stbi__png_info_raw(p : stbi__png*, x : int32*, y : int32*, comp : int32*) : int32
+{
+    if stbi__parse_png_file(p, STBI__SCAN_header, 0) == 0
+    {
+        stbi__rewind(p.s);
+        return 0;
+    }
+    if x != nil { *x = intcast(int32, p.s.img_x); }
+    if y != nil { *y = intcast(int32, p.s.img_y); }
+    if comp != nil { *comp = p.s.img_n; }
+    return 1;
+}
+
+fn stbi__png_info(s : stbi__context*, x : int32*, y : int32*, comp : int32*) : int32
+{
+    var p : stbi__png;
+    p.s = s;
+    p.idata = nil;
+    p.expanded = nil;
+    p.out = nil;
+    return stbi__png_info_raw(&p, x, y, comp);
+}
+
+// Format conversion
+fn stbi__convert_format(data : uint8*, img_n : int32, req_comp : int32, x : int32, y : int32) : uint8*
+{
+    var i : int32;
+    var j : int32;
+    var good : uint8*;
+
+    if req_comp == img_n return data;
+
+    good = ptrcast(uint8*, stbi__malloc(intcast(usize, req_comp) * intcast(usize, x) * intcast(usize, y)));
+    if good == nil
+    {
+        mem::free(data);
+        return stbi__errpuc("outofmem", "Out of memory");
+    }
+
+    for j = 0; j < y; ++j
+    {
+        var src  : uint8* = ptrcast(uint8*, data + j * x * img_n);
+        var dest : uint8* = ptrcast(uint8*, good + j * x * req_comp);
+
+        if img_n == 1 and req_comp == 2
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = src[0]; dest[1] = 255;
+                src++; dest++;
+            }
+        }
+        else if img_n == 1 and req_comp == 3
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                let v : uint8 = src[0];
+                dest[0] = v; dest[1] = v; dest[2] = v;
+                src++; dest = dest + 3;
+            }
+        }
+        else if img_n == 1 and req_comp == 4
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                let v : uint8 = src[0];
+                dest[0] = v; dest[1] = v; dest[2] = v; dest[3] = 255;
+                src++; dest = dest + 4;
+            }
+        }
+        else if img_n == 2 and req_comp == 1
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = src[0];
+                src = src + 2; dest++;
+            }
+        }
+        else if img_n == 2 and req_comp == 3
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                let v : uint8 = src[0];
+                dest[0] = v; dest[1] = v; dest[2] = v;
+                src = src + 2; dest = dest + 3;
+            }
+        }
+        else if img_n == 2 and req_comp == 4
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                let v : uint8 = src[0];
+                dest[0] = v; dest[1] = v; dest[2] = v; dest[3] = src[1];
+                src = src + 2; dest = dest + 4;
+            }
+        }
+        else if img_n == 3 and req_comp == 4
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = src[0]; dest[1] = src[1]; dest[2] = src[2]; dest[3] = 255;
+                src = src + 3; dest = dest + 4;
+            }
+        }
+        else if img_n == 3 and req_comp == 1
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                // FIX: arithmetic in int32, then truncate
+                dest[0] = intcast(uint8, (intcast(int32, src[0]) * 77 + intcast(int32, src[1]) * 150 + intcast(int32, src[2]) * 29) >> 8);
+                src = src + 3; dest++;
+            }
+        }
+        else if img_n == 3 and req_comp == 2
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = intcast(uint8, (intcast(int32, src[0]) * 77 + intcast(int32, src[1]) * 150 + intcast(int32, src[2]) * 29) >> 8);
+                dest[1] = 255;
+                src = src + 3; dest = dest + 2;
+            }
+        }
+        else if img_n == 4 and req_comp == 1
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = intcast(uint8, (intcast(int32, src[0]) * 77 + intcast(int32, src[1]) * 150 + intcast(int32, src[2]) * 29) >> 8);
+                src = src + 4; dest++;
+            }
+        }
+        else if img_n == 4 and req_comp == 2
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = intcast(uint8, (intcast(int32, src[0]) * 77 + intcast(int32, src[1]) * 150 + intcast(int32, src[2]) * 29) >> 8);
+                dest[1] = src[3];
+                src = src + 4; dest = dest + 2;
+            }
+        }
+        else if img_n == 4 and req_comp == 3
+        {
+            for i = x - 1; i >= 0; --i
+            {
+                dest[0] = src[0]; dest[1] = src[1]; dest[2] = src[2];
+                src = src + 4; dest = dest + 3;
+            }
+        }
+    }
+
+    mem::free(data);
+    return good;
+}
+
+// Context functions
+fn stbi__start_mem(s : stbi__context*, buffer : uint8*, len : int32) : void
+{
+    s.io.read = nil;
+    s.read_from_callbacks = 0;
+    s.img_buffer = buffer;
+    s.img_buffer_original = buffer;
+    s.img_buffer_end = buffer + intcast(usize, len);
+}
+
+fn stbi__start_callbacks(s : stbi__context*, c : stbi_io_callbacks*, user : void*) : void
+{
+    s.io = *c;
+    s.io_user_data = user;
+    s.buflen = 128;    // sizeof(s.buffer_start)
+    s.read_from_callbacks = 1;
+    s.img_buffer_original = cast(uint8*, s.buffer_start);
+    stbi__refill_buffer(s);
+}
+
+// I/O functions
+fn stbi__get8(s : stbi__context*) : uint8
+{
+    if s.img_buffer < s.img_buffer_end
+    {
+        var val : uint8 = *s.img_buffer;
+        s.img_buffer++;
+        return val;
+    }
+    if s.read_from_callbacks != 0
+    {
+        stbi__refill_buffer(s);
+        var val : uint8 = *s.img_buffer;
+        s.img_buffer++;
+        return val;
+    }
+    return 0;
+}
+
+fn stbi__get16be(s : stbi__context*) : int32
+{
+    var z : int32 = intcast(int32, stbi__get8(s));
+    return (z << 8) + intcast(int32, stbi__get8(s));
+}
+
+fn stbi__get32be(s : stbi__context*) : uint32
+{
+    var z : uint32 = intcast(uint32, stbi__get16be(s));
+    return (z << 16) + intcast(uint32, stbi__get16be(s));
+}
+
+fn stbi__get16le(s : stbi__context*) : int32
+{
+    var z : int32 = intcast(int32, stbi__get8(s));
+    return z + (intcast(int32, stbi__get8(s)) << 8);
+}
+
+fn stbi__get32le(s : stbi__context*) : uint32
+{
+    var z : uint32 = intcast(uint32, stbi__get16le(s));
+    return z + (intcast(uint32, stbi__get16le(s)) << 16);
+}
+
+fn stbi__skip(s : stbi__context*, n : int32) : void
+{
+    if s.io.read != nil
+    {
+        var blen : int32 = intcast(int32, s.img_buffer_end - s.img_buffer);
+        if blen < n
+        {
+            s.img_buffer = s.img_buffer_end;
+            if s.io.skip != nil { s.io.skip(s.io_user_data, n - blen); }
+            return;
+        }
+    }
+    s.img_buffer = s.img_buffer + intcast(usize, n);
+}
+
+fn stbi__getn(s : stbi__context*, buffer : uint8*, n : int32) : int32
+{
+    if s.io.read != nil
+    {
+        var blen : int32 = intcast(int32, s.img_buffer_end - s.img_buffer);
+        if blen < n
+        {
+            mem::copy(buffer, s.img_buffer, intcast(usize, blen));
+            // FIX: pointer arithmetic: offset blen as usize, not int32
+            var count : int32 = s.io.read(s.io_user_data, ptrcast(uint8*, buffer + intcast(usize, blen)), n - blen);
+            s.img_buffer = s.img_buffer_end;
+            return count == (n - blen) ? 1 : 0;
+        }
+    }
+
+    if s.img_buffer + intcast(usize, n) <= s.img_buffer_end
+    {
+        mem::copy(buffer, s.img_buffer, intcast(usize, n));
+        s.img_buffer = s.img_buffer + intcast(usize, n);
+        return 1;
+    }
+    return 0;
+}
+
+fn stbi__at_eof(s : stbi__context*) : int32
+{
+    if s.io.read != nil
+    {
+        if s.io.eof != nil
+        {
+            if s.io.eof(s.io_user_data) == 0 return 0;
+        }
+        if s.read_from_callbacks == 0 return 1;
+    }
+    return (s.img_buffer >= s.img_buffer_end) ? 1 : 0;
+}
+
+fn stbi__refill_buffer(s : stbi__context*) : void
+{
+    var n : int32 = s.io.read(s.io_user_data, ptrcast(uint8*, s.buffer_start), s.buflen);
+    if n == 0
+    {
+        s.read_from_callbacks = 0;
+        s.img_buffer = cast(uint8*, s.buffer_start);
+        s.img_buffer_end = s.buffer_start + 1;
+        *s.img_buffer = 0;
+    }
+    else
+    {
+        s.img_buffer = cast(uint8*, s.buffer_start);
+        s.img_buffer_end = s.buffer_start + intcast(usize, n);
+    }
+}
+
+fn stbi__rewind(s : stbi__context*) : void
+{
+    s.img_buffer = s.img_buffer_original;
+}
+
+// Public API
+pub fn stbi_load_from_memory(buffer : uint8*, len : int32, x : int32*, y : int32*, comp : int32*?, req_comp : int32) : uint8*?
+{
+    var s : stbi__context;
+    stbi__start_mem(&s, buffer, len);
+    return stbi__png_load(&s, x, y, comp, req_comp);
+}
+
+pub fn stbi_load_from_callbacks(clbk : stbi_io_callbacks*, user : void*, x : int32*, y : int32*, comp : int32*, req_comp : int32) : uint8*
+{
+    var s : stbi__context;
+    stbi__start_callbacks(&s, clbk, user);
+    return stbi__png_load(&s, x, y, comp, req_comp);
+}
+
+pub fn stbi_load(filename : uint8*, x : int32*, y : int32*, comp : int32*, req_comp : int32) : uint8*
+{
+    // File I/O not implemented in this version
+    //_ = filename;
+    return stbi__errpuc("file I/O not implemented", "Use stbi_load_from_memory instead");
+}
+
+pub fn stbi_info_from_memory(buffer : uint8*, len : int32, x : int32*, y : int32*, comp : int32*) : int32
+{
+    var s : stbi__context;
+    stbi__start_mem(&s, buffer, len);
+    return stbi__png_info(&s, x, y, comp);
+}
+
+pub fn stbi_info_from_callbacks(c : stbi_io_callbacks*, user : void*, x : int32*, y : int32*, comp : int32*) : int32
+{
+    var s : stbi__context;
+    stbi__start_callbacks(&s, c, user);
+    return stbi__png_info(&s, x, y, comp);
+}
+
+pub fn stbi_set_unpremultiply_on_load(flag : int32) : void
+{
+    stbi__unpremultiply_on_load = flag;
+}
+
+pub fn stbi_convert_iphone_png_to_rgb(flag : int32) : void
+{
+    stbi__de_iphone_flag = flag;
+}
+
+// ZLIB public entry point
+pub fn stbi_zlib_decode_malloc_guesssize_headerflag(buffer : uint8*, len : int32, initial_size : int32, outlen : int32*, parse_header : int32) : uint8*?
+{
+    var a : stbi__zbuf;
+    var p : uint8* = ptrcast(uint8*, stbi__malloc(intcast(usize, initial_size)));
+    if p == nil return nil;
+    a.zbuffer = buffer;
+    a.zbuffer_end = buffer + intcast(usize, len);
+
+    if stbi__do_zlib(&a, p, initial_size, 1, parse_header) != 0
+    {
+        if outlen != nil { *outlen = intcast(int32, a.zout - a.zout_start); }
+        return a.zout_start;
+    }
+    else
+    {
+        mem::free(a.zout_start);
+        return nil;
+    }
+}
+
+// Internal zlib
+fn stbi__do_zlib(a : stbi__zbuf*, obuf : uint8*, olen : int32, exp : int32, parse_header : int32) : int32
+{
+    a.zout_start = obuf;
+    a.zout = obuf;
+    a.zout_end = obuf + intcast(usize, olen);
+    a.z_expandable = exp;
+    return stbi__parse_zlib(a, parse_header);
+}
+
+fn stbi__parse_zlib(a : stbi__zbuf*, parse_header : int32) : int32
+{
+    var final_bit : int32;
+    var type_bit : int32;
+    if parse_header != 0
+    {
+        if stbi__parse_zlib_header(a) == 0 return 0;
+    }
+    a.num_bits    = 0;
+    a.code_buffer = 0;
+    while true
+    {
+        final_bit = intcast(int32, stbi__zreceive(a, 1));
+        type_bit  = intcast(int32, stbi__zreceive(a, 2));
+        if type_bit == 0
+        {
+            if stbi__parse_uncompressed_block(a) == 0 return 0;
+        }
+        else if type_bit == 3
+        {
+            return 0;
+        }
+        else
+        {
+            if type_bit == 1
+            {
+                // Use fixed code lengths
+                if stbi__zdefault_distance[31] == 0 { stbi__init_zdefaults(); }
+                if stbi__zbuild_huffman(&a.z_length, stbi__zdefault_length, 288) == 0 return 0;
+                if stbi__zbuild_huffman(&a.z_distance, stbi__zdefault_distance, 32) == 0 return 0;
+            }
+            else
+            {
+                if stbi__compute_huffman_codes(a) == 0 return 0;
+            }
+            if stbi__parse_huffman_block(a) == 0 return 0;
+        }
+        if final_bit != 0 break;
+    }
+    return 1;
+}
+
+fn stbi__parse_zlib_header(a : stbi__zbuf*) : int32
+{
+    var cmf : int32 = intcast(int32, stbi__zget8(a));
+    var cm  : int32 = cmf & 15;
+    var flg : int32 = intcast(int32, stbi__zget8(a));
+    if (cmf * 256 + flg) % 31 != 0 return stbi__err("bad zlib header");
+    if (flg & 32) != 0             return stbi__err("no preset dict");
+    if cm != 8                     return stbi__err("bad compression");
+    return 1;
+}
+
+fn stbi__parse_uncompressed_block(a : stbi__zbuf*) : int32
+{
+    var header : uint8[4];
+    var len : int32;
+    var nlen : int32;
+    var k : int32;
+    if (a.num_bits & 7) != 0 { stbi__zreceive(a, a.num_bits & 7); } // Discard
+
+    // Drain the bit-packed data into header
+    k = 0;
+    while a.num_bits > 0
+    {
+        header[k] = intcast(uint8, a.code_buffer & 255u32);
+        a.code_buffer >>= 8u32;
+        a.num_bits -= 8;
+        k += 1;
+    }
+    // STBI_ASSERT(a.num_bits == 0);
+    // Now fill header the normal way
+    while k < 4
+    {
+        header[k] = stbi__zget8(a);
+        k++;
+    }
+
+    len = intcast(int32, header[1]) * 256 + intcast(int32, header[0]);
+    nlen = intcast(int32, header[3]) * 256 + intcast(int32, header[2]);
+    if nlen != (len ^ 0xffff) return stbi__err("zlib corrupt");
+    if a.zbuffer + intcast(usize, len) > a.zbuffer_end return stbi__err("read past buffer");
+    if a.zout + intcast(usize, len) > a.zout_end
+    {
+        if stbi__zexpand(a, a.zout, len) == 0 return 0;
+    }
+    mem::copy(a.zout, a.zbuffer, intcast(usize, len));
+    a.zbuffer = a.zbuffer + intcast(usize, len);
+    a.zout = a.zout + intcast(usize, len);
+    return 1;
+}
+
+fn stbi__zexpand(z : stbi__zbuf*, zout : uint8*, n : int32) : int32
+{
+    var q : uint8*;
+    var cur : int32;
+    var limit : int32;
+    z.zout = zout;
+    if z.z_expandable == 0 return stbi__err("output buffer limit");
+    cur = intcast(int32, z.zout - z.zout_start);
+    limit = intcast(int32, z.zout_end - z.zout_start);
+    while cur + n > limit { limit *= 2; }
+    q = ptrcast(uint8*, mem::realloc(z.zout_start, intcast(usize, limit)));
+    if q == nil return stbi__err("outofmem");
+    z.zout_start = q;
+    z.zout = q + intcast(usize, cur);
+    z.zout_end = q + intcast(usize, limit);
+    return 1;
+}
+
+var stbi__zlength_base : int32[31] = {
+    3,4,5,6,7,8,9,10,11,13,
+    15,17,19,23,27,31,35,43,51,59,
+    67,83,99,115,131,163,195,227,258,0,0
+};
+
+var stbi__zlength_extra : int32[31] = {
+    0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0
+};
+
+var stbi__zdist_base : int32[32] = {
+    1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,
+    257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577,0,0
+};
+
+var stbi__zdist_extra : int32[32] = {
+    0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13
+};
+
+fn stbi__parse_huffman_block(a : stbi__zbuf*) : int32
+{
+    var zout : uint8* = a.zout;
+    while true
+    {
+        var z : int32 = stbi__zhuffman_decode(a, &a.z_length);
+        if z < 256
+        {
+            if z < 0 return stbi__err("bad huffman code");  // Error in huffman codes
+            if zout >= a.zout_end
+            {
+                if stbi__zexpand(a, zout, 1) == 0 return 0;
+                zout = a.zout;
+            }
+            *zout = intcast(uint8, z);
+            zout++;
+        }
+        else
+        {
+            var p : uint8*;
+            var len : int32;
+            var dist : int32;
+            if z == 256
+            {
+                a.zout = zout;
+                return 1;
+            }
+            z -= 257;
+            len = stbi__zlength_base[z];
+            if stbi__zlength_extra[z] != 0 { len += intcast(int32, stbi__zreceive(a, stbi__zlength_extra[z])); }
+            z = stbi__zhuffman_decode(a, &a.z_distance);
+            if z < 0 return stbi__err("bad huffman code");
+            dist = stbi__zdist_base[z];
+            if stbi__zdist_extra[z] != 0 { dist += intcast(int32, stbi__zreceive(a, stbi__zdist_extra[z])); }
+            if zout - a.zout_start < intcast(uint64, dist) return stbi__err("bad dist");
+            if zout + intcast(usize, len) > a.zout_end
+            {
+                if stbi__zexpand(a, zout, len) == 0 return 0;
+                zout = a.zout;
+            }
+            p = zout - intcast(usize, dist);
+            if dist == 1    // Run of one byte; common in images
+            {
+                var v : uint8 = *p;
+                var i2 : int32 = 0;
+                while i2 < len
+                {
+                    *zout = v;
+                    zout++;
+                    i2 += 1;
+                }
+            }
+            else
+            {
+                var i2 : int32 = 0;
+                while i2 < len
+                {
+                    *zout = *p;
+                    zout++;
+                    p++;
+                    i2 += 1;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+let stbi__length_dezigzag : uint8[19] = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15};
+
+fn stbi__compute_huffman_codes(a : stbi__zbuf*) : int32
+{
+    var z_codelength : stbi__zhuffman;
+    var lencodes : uint8[286+32+137];   // Padding for maximum single op
+    var codelength_sizes : uint8[19];
+    var i : int32;
+    var n : int32;
+
+    var hlit : int32 = intcast(int32, stbi__zreceive(a, 5)) + 257;
+    var hdist : int32 = intcast(int32, stbi__zreceive(a, 5)) + 1;
+    var hclen : int32 = intcast(int32, stbi__zreceive(a, 4)) + 4;
+
+    for i = 0; i < hclen; ++i
+    {
+        var s : int32 = intcast(int32, stbi__zreceive(a, 3));
+        var idx : usize = intcast(usize, stbi__length_dezigzag[i]);
+        codelength_sizes[idx] = intcast(uint8, s);
+    }
+    if stbi__zbuild_huffman(&z_codelength, codelength_sizes, 19) == 0 return 0;
+
+    n = 0;
+    while n < hlit + hdist
+    {
+        var c : int32 = stbi__zhuffman_decode(a, &z_codelength);
+        // STBI_ASSERT(c >= 0 and c < 19);
+        if c < 16
+        {
+            lencodes[n] = intcast(uint8, c);
+            n++;
+        }
+        else if c == 16
+        {
+            c = intcast(int32, stbi__zreceive(a, 2)) + 3;
+            mem::set(lencodes + n, lencodes[n - 1], intcast(usize, c));
+            n += c;
+        }
+        else if c == 17
+        {
+            c = intcast(int32, stbi__zreceive(a, 3)) + 3;
+            mem::set(lencodes + n, 0, intcast(usize, c));
+            n += c;
+        }
+        else
+        {
+            // STBI_ASSERT(c == 18);
+            c = intcast(int32, stbi__zreceive(a, 7)) + 11;
+            mem::set(lencodes + n, 0, intcast(usize, c));
+            n += c;
+        }
+    }
+
+    if n != hlit + hdist return stbi__err("bad codelengths");
+    if stbi__zbuild_huffman(&a.z_length, lencodes, hlit) == 0 return 0;
+    if stbi__zbuild_huffman(&a.z_distance, lencodes + intcast(usize, hlit), hdist) == 0 return 0;
+    return 1;
+}
