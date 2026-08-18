@@ -13,7 +13,7 @@ from window import micro_open_window
 from timer import micro_open_timer
 from gfx import micro_open_gfx
 from font import micro_open_Font
-from data import micro_open_Data
+from data import micro_open_Data, micro_open_data
 from image import micro_open_Image
 from sera import sr_Buffer
 
@@ -51,6 +51,7 @@ let mods : Mods[] = {
     {"Image", micro_open_Image},
     {"Font", micro_open_Font},
     // Modules
+    {"data", micro_open_data},
     {"keyboard", micro_open_keyboard},
     {"mouse", micro_open_mouse},
     {"event", micro_open_event},

@@ -17,13 +17,20 @@ SRCS = 	micro.vp \
         stb_truetype.vp
 
 OBJS = $(SRCS:.vp=.obj)
+C_OBJS = miniz.obj
 
 # Use an environment variable...
-VXC_STD ?= .
+#VXC_STD ?=
 VXC_OBJS = $(VXC_STD)/math.obj $(VXC_STD)/mem.obj $(VXC_STD)/str.obj $(VXC_STD)/io.obj $(VXC_STD)/os.obj $(VXC_STD)/conv.obj
 
+CC ?= clang
+CFLAGS ?= -O2
+MINIZ_CFLAGS = $(CFLAGS)
+#-DMINIZ_NO_STDIO
+CLANG_RT_LIBDIR = $(shell clang --print-resource-dir)/lib/windows
+
 LDFLAGS = -L. --entry=main --subsystem=console
-LIBS = -ltea00 -lglfw3 -lkernel32 -lopengl32 -lgdi32 -luser32
+LIBS = -ltea00 -lglfw3 -lkernel32 -lopengl32 -lgdi32 -luser32 -lucrt -L$(CLANG_RT_LIBDIR) -lclang_rt.builtins-x86_64
 
 # Rules
 .PHONY: all clean
@@ -33,15 +40,19 @@ all: $(TARGET)
 $(VXC_OBJS):
 	$(if $(wildcard $@),,$(error Pre-built object $@ is missing))
 
-$(TARGET): $(OBJS) $(VXC_OBJS)
+$(TARGET): $(OBJS) $(C_OBJS) $(VXC_OBJS)
 	@echo "  LINK                      $@"
-	@ld $(OBJS) $(VXC_OBJS) $(LDFLAGS) $(LIBS) -o $@
+	@ld $(OBJS) $(C_OBJS) $(VXC_OBJS) $(LDFLAGS) $(LIBS) -o $@
 	@echo "  OK"
 
 %.obj: %.vp
 	@echo "  VXC                       $@"
 	@vxc comp $<
 
+miniz.obj: miniz.c miniz.h
+	@echo "  CC                        $@"
+	@$(CC) $(MINIZ_CFLAGS) -c miniz.c -o $@
+
 clean:
-	@rm -f $(OBJS) $(TARGET)
+	@rm -f $(OBJS) $(C_OBJS) $(TARGET)
 	@echo "  CLEAN"

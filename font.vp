@@ -51,7 +51,7 @@ fn font_fromFile(T : tea_State*) : void
     if data == nil
     {
         //tea_error(T, "could not open file '%s'", filename);
-        tea_error(T, "could not open file");
+        tea_error(T, "could not open file font");
     }
     let err : const uint8* = load_font(self, data, intcast(int32, len), fontsize);
     mem::free(data);

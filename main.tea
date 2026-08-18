@@ -12,7 +12,7 @@ var img2;
 
 var font;
 var font2
-
+var s2
 function micro.load()
 {
     print('loading')
@@ -54,6 +54,11 @@ function micro.load()
     font = micro.Font.fromFile('micro.ttf', 8)
     print(font)
     micro.gfx.setFont(font)
+
+    var s1 = micro.data.compress('"It Starts with One:\nThe Legend and Legacy of Linkin Park"\nis a biography that explores the 20+ year career\nof the rock band Linkin Park,\nfeaturing interviews and insights from their associates.\nThe book highlights their significant impact on modern music\nand their enduring legacy.')
+    //print(s1)
+    s2 = micro.data.decompress(s1)
+    print(s2)
 }
 
 function micro.update(dt)
@@ -106,7 +111,8 @@ function micro.draw()
     micro.gfx.rect('fill', 10, 10, 100, 50)
     micro.gfx.rect('line', 10, 110, 100, 50)
 
-    micro.gfx.print('hello!', dx + 2, dy + 2)
+    //micro.gfx.print('hello!', dx + 2, dy + 2)
+    micro.gfx.print(s2, dx + 2, dy + 2)
     micro.gfx.setFont(font2)
     micro.gfx.print('The five boxing wizards\njump quickly!', 81, 75)
     micro.gfx.setFont(font)

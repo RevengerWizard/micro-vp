@@ -2,6 +2,10 @@ import std::mem as mem
 
 from tea import *
 
+from fs import *
+
+from miniz import *
+
 pub struct Data
 {
     data : void*;
@@ -23,13 +27,20 @@ fn new_data(T : tea_State*) : Data*
     return self;
 }
 
-/*fn data_fromFile(T : tea_State*) : void
+fn data_fromFile(T : tea_State*) : void
 {
     let filename : const uint8* = tea_check_string(T, 0);
     let self : Data* = new_data(T);
     let len : usize;
-    let data : void* =
-}*/
+    let data : void* = fs_read(filename, &len);
+    if data == nil
+    {
+        //tea_error(T, "could not open file '%s'", filename);
+        tea_error(T, "could not open file data");
+    }
+    self.data = data;
+    self.len = len;
+}
 
 fn data_fromString(T : tea_State*) : void
 {
@@ -58,7 +69,7 @@ fn data_tostring(T : tea_State*) : void
 }
 
 let reg : tea_Methods[] = {
-    //{"fromFile", "static", data_fromFile, 1, 0},
+    {"fromFile", "static", data_fromFile, 1, 0},
     {"fromString", "static", data_fromString, 1, 0},
     {"getLength", "method", data_getLength, 1, 0},
     {"tostring", "method", data_tostring, 1, 0},
@@ -70,4 +81,152 @@ pub fn micro_open_Data(T : tea_State*) : void
     tea_create_class(T, "Data", reg);
     tea_push_value(T, -1);
     tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Data");
+}
+
+// micro.data
+
+fn miniz_alloc(opaque : void*, items : usize, size : usize) : void*
+{
+    return mem::alloc(items * size);
+}
+
+fn miniz_free(opaque : void*, address : void*) : void
+{
+    mem::free(address);
+}
+
+fn data_compress(T : tea_State*) : void
+{
+    var source_len : usize;
+    let source : const uint8* = tea_check_lstring(T, 0, &source_len);
+
+    var compressed_len : mz_ulong = mz_compressBound(intcast(mz_ulong, source_len));
+    var compressed : uint8*? = nil;
+    var status : int32;
+    var stream : mz_stream;
+
+    compressed = ptrcast(uint8*, mem::alloc(intcast(usize, compressed_len)));
+    if compressed == nil
+    {
+        tea_error(T, "out of memory");
+    }
+
+    mem::set(&stream, 0, sizeof(mz_stream));
+    stream.zalloc = miniz_alloc;
+    stream.zfree = miniz_free;
+    stream.opaque = nil;
+    stream.next_in = source;
+    stream.avail_in = intcast(mz_ulong, source_len);
+    stream.next_out = compressed;
+    stream.avail_out = compressed_len;
+
+    status = mz_deflateInit(&stream, MZ_DEFAULT_COMPRESSION);
+    if status != MZ_OK
+    {
+        mem::free(compressed);
+        tea_error(T, "error compress");
+    }
+
+    status = mz_deflate(&stream, MZ_FINISH);
+    if status != MZ_STREAM_END
+    {
+        mz_deflateEnd(&stream);
+        mem::free(compressed);
+        tea_error(T, "error compress");
+    }
+
+    compressed_len = stream.total_out;
+    status = mz_deflateEnd(&stream);
+    if status != MZ_OK
+    {
+        mem::free(compressed);
+        tea_error(T, "error compress");
+    }
+
+    tea_push_lstring(T, compressed, intcast(usize, compressed_len));
+    mem::free(compressed);
+}
+
+fn data_decompress(T : tea_State*) : void
+{
+    var compressed_len : usize;
+    var compressed : const uint8* = tea_check_lstring(T, 0, &compressed_len);
+
+    // Get the decompressed size
+    var decompressed_len : uint32 = intcast(uint32, compressed_len) * 2;  // Initial estimate
+    if decompressed_len < 256u32
+    {
+        decompressed_len = 256u32;
+    }
+    var decompressed : uint8*? = nil;
+    var status : int32;
+
+    do
+    {
+        // Allocate or reallocate buffer
+        var new_buffer : uint8* = ptrcast(uint8*, mem::realloc(decompressed, intcast(usize, decompressed_len)));
+        if new_buffer == nil
+        {
+            mem::free(decompressed);
+            tea_error(T, "out of memory");
+        }
+        decompressed = new_buffer;
+
+        var stream : mz_stream;
+        mem::set(&stream, 0, sizeof(mz_stream));
+        stream.zalloc = miniz_alloc;
+        stream.zfree = miniz_free;
+        stream.opaque = nil;
+        stream.next_in = compressed;
+        stream.avail_in = intcast(mz_ulong, compressed_len);
+        stream.next_out = decompressed;
+        stream.avail_out = decompressed_len;
+
+        status = mz_inflateInit(&stream);
+        if status != MZ_OK
+        {
+            mem::free(decompressed);
+            tea_error(T, "error decompress");
+        }
+
+        status = mz_inflate(&stream, MZ_FINISH);
+        if status == MZ_STREAM_END
+        {
+            decompressed_len = stream.total_out;
+        }
+
+        let end_status : int32 = mz_inflateEnd(&stream);
+        if end_status != MZ_OK
+        {
+            mem::free(decompressed);
+            tea_error(T, "error decompress");
+        }
+
+        if status == MZ_BUF_ERROR
+        {
+            // Buffer too small, double it and try again
+            decompressed_len *= 2u32;
+        }
+    }
+    while status == MZ_BUF_ERROR;
+
+    if status != MZ_STREAM_END
+    {
+        mem::free(decompressed);
+        tea_error(T, "error decompress");
+    }
+
+    tea_push_lstring(T, decompressed, intcast(usize, decompressed_len));
+    mem::free(decompressed);
+}
+
+let dmod : tea_Reg[] = {
+    { "compress", data_compress, 1, 0 },
+    { "decompress", data_decompress, 1, 0 },
+    {}
+};
+
+pub fn micro_open_data(T : tea_State*) : void
+{
+    tea_create_submodule(T, "data", dmod);
 }
