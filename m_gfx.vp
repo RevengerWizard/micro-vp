@@ -4,7 +4,7 @@ import std::os as os
 from sera import *
 from tea import *
 from spxe import spxeStart, Px
-from image import get_color, get_rect, check_subrect, Image, micro_image_new
+from m_image import get_color, get_rect, check_subrect, Image, micro_image_new
 
 from micro import pixbuf, screen, WIDTH, HEIGHT
 

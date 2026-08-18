@@ -4,13 +4,13 @@ SRCS = 	micro.vp \
 		sera.vp \
 		fs.vp \
 		ttf.vp \
-		event.vp \
-		window.vp \
-		timer.vp \
-		gfx.vp \
-		data.vp \
-		image.vp \
-		font.vp \
+		m_event.vp \
+		m_window.vp \
+		m_timer.vp \
+		m_gfx.vp \
+		m_data.vp \
+		m_image.vp \
+		m_font.vp \
        	spxe.vp \
         gleq.vp \
         stb_image.vp \

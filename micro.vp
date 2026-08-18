@@ -7,15 +7,15 @@ from windows import *
 from spxe import *
 from tea import *
 from gleq import *
-
-from event import micro_open_event
-from window import micro_open_window
-from timer import micro_open_timer
-from gfx import micro_open_gfx
-from font import micro_open_Font
-from data import micro_open_Data, micro_open_data
-from image import micro_open_Image
 from sera import sr_Buffer
+
+from m_event import micro_open_event
+from m_window import micro_open_window
+from m_timer import micro_open_timer
+from m_gfx import micro_open_gfx
+from m_font import micro_open_Font
+from m_data import micro_open_Data, micro_open_data
+from m_image import micro_open_Image
 
 pub def WIDTH = 200;
 pub def HEIGHT = 200;

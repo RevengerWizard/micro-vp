@@ -4,7 +4,7 @@ from ttf import *
 from tea import *
 from sera import *
 from fs import *
-from image import Image, micro_image_new
+from m_image import Image, micro_image_new
 
 struct Font
 {
