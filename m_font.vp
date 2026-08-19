@@ -62,16 +62,22 @@ fn font_fromFile(T : tea_State*) : void
     }
 }
 
-/*fn font_fromEmbedded(T : tea_State*)
-{
-#include "font_ttf.h"
+from embed::font_ttf import *
 
-    int fontsize = tea_opt_integer(T, 0, DEFAULT_FONTSIZE);
-    Font* self = font_new(T);
-    const char* err = load_font(self, font_ttf, sizeof(font_ttf), fontsize);
-    if(err)
-        tea_error(T, "%s", err);
-}*/
+let f = font_ttf; //bug...
+
+fn font_fromEmbedded(T : tea_State*) : void
+{
+    let fontsize : int32 = intcast(int32, tea_opt_integer(T, 0, 8));    // DEFAULT_FONTSIZE
+    let self : Font* = font_new(T);
+    //let err : const uint8* = load_font(self, ptrcast(uint8*, font_ttf), sizeof(typeof(font_ttf)), fontsize);
+    let err : const uint8* = load_font(self, f, sizeof(typeof(font_ttf)), fontsize);
+    if err != nil
+    {
+        //tea_error(T, "%s", err);
+        tea_error(T, "error fromEmbedded");
+    }
+}
 
 fn font_render(T : tea_State*) : void
 {
@@ -120,7 +126,7 @@ fn font_tostring(T : tea_State*) : void
 
 let freg :  const tea_Methods[] = {
     {"fromFile", "static", font_fromFile, 1, 1},
-    //{"fromEmbedded", "static", font_fromEmbedded, 0, 1},
+    {"fromEmbedded", "static", font_fromEmbedded, 0, 1},
     {"render", "method", font_render, 2, 0},
     {"getWidth", "method", font_getWidth, 2, 0},
     {"getHeight", "method", font_getHeight, 1, 0},

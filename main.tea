@@ -11,7 +11,6 @@ var img;
 var img2;
 
 var font;
-var font2
 var s2
 function micro.load()
 {
@@ -50,7 +49,7 @@ function micro.load()
     //img2.clear(255, 255, 255)
     print(img2, img2.getWidth(), img2.getHeight())
 
-    font2 = micro.Font.fromFile('font.ttf', 8)
+    //font2 = micro.Font.fromFile('font.ttf', 8)
     font = micro.Font.fromFile('micro.ttf', 8)
     print(font)
     micro.gfx.setFont(font)
@@ -113,9 +112,9 @@ function micro.draw()
 
     //micro.gfx.print('hello!', dx + 2, dy + 2)
     micro.gfx.print(s2, dx + 2, dy + 2)
-    micro.gfx.setFont(font2)
-    micro.gfx.print('The five boxing wizards\njump quickly!', 81, 75)
     micro.gfx.setFont(font)
+    micro.gfx.print('The five boxing wizards\njump quickly!', 81, 75)
+    micro.gfx.setFont()
 }
 
 function micro.quit()

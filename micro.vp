@@ -61,6 +61,12 @@ let mods : Mods[] = {
     {}
 };
 
+from embed::graphics_tea import *
+//from embed::keyboard_tea import *
+from embed::mouse_tea import *
+from embed::timer_tea import *
+from embed::init_tea import *
+
 /*
 * Init embedded scripts
 * -- these should be ordered in the array in the order we want them loaded;
@@ -69,14 +75,14 @@ let mods : Mods[] = {
 struct Items
 {
     name : const uint8*;
-    //data : const uint8*;
-    //size : usize;
+    data : const uint8*;
+    size : usize;
 }
 let items : Items[] = {
-    {"graphics.tea"},
-    {"mouse.tea"},
-    {"timer.tea"},
-    {"init.tea"},
+    {"graphics.tea", graphics_tea, sizeof(typeof(graphics_tea))},
+    {"mouse.tea", mouse_tea, sizeof(typeof(mouse_tea))},
+    {"timer.tea", timer_tea, sizeof(typeof(timer_tea))},
+    {"init.tea", init_tea, sizeof(typeof(init_tea))},
     {}
 };
 
@@ -90,7 +96,19 @@ fn micro_open(T : tea_State*) : bool
     }
     tea_set_global(T, "micro");
 
-    for var i : uint32 = 0; items[i].name != nil; i++
+    for var i : int32 = 0; items[i].name != nil; i++
+    {
+        //if tea_load_file(T, items[i].name, nil) != TEA_OK or tea_pcall(T, 0) != TEA_OK
+        if tea_load_buffer(T, items[i].data, items[i].size, items[i].name) != TEA_OK or tea_pcall(T, 0) != TEA_OK
+        {
+            let size : usize;
+            let str : const uint8* = tea_to_lstring(T, -1, &size);
+            io::write(io::stderr, str, size, nil);
+            io::write(io::stderr, "\n", 1, nil);
+            return false;
+        }
+    }
+    /*for var i : uint32 = 1; items[i].name != nil; i++
     {
         if tea_load_file(T, items[i].name, nil) != TEA_OK or tea_pcall(T, 0) != TEA_OK
         {
@@ -100,7 +118,7 @@ fn micro_open(T : tea_State*) : bool
             io::write(io::stderr, "\n", 1, nil);
             return false;
         }
-    }
+    }*/
     return true;
 }
 

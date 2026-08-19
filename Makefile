@@ -32,10 +32,25 @@ CLANG_RT_LIBDIR = $(shell clang --print-resource-dir)/lib/windows
 LDFLAGS = -L. --entry=main --subsystem=console
 LIBS = -ltea00 -lglfw3 -lkernel32 -lopengl32 -lgdi32 -luser32 -lucrt -L$(CLANG_RT_LIBDIR) -lclang_rt.builtins-x86_64
 
+EMBED_TEA_FILES = $(wildcard embed/*.tea)
+EMBED_FONT_FILES = $(wildcard embed/*.ttf)
+EMBED_VP_HEADERS = $(patsubst embed/%.tea, embed/%_tea.vp, $(EMBED_TEA_FILES))
+EMBED_VP_HEADERS += $(patsubst embed/%.ttf, embed/%_ttf.vp, $(EMBED_FONT_FILES))
+
 # Rules
-.PHONY: all clean
+.PHONY: all embed clean
 
 all: $(TARGET)
+
+embed: $(EMBED_VP_HEADERS)
+
+embed/%_tea.vp: embed/%.tea
+	@echo "  EMBED                     $@"
+	@python embed.py $< > $@
+
+embed/%_ttf.vp: embed/%.ttf
+	@echo "  EMBED                     $@"
+	@python embed.py $< > $@
 
 $(VXC_OBJS):
 	$(if $(wildcard $@),,$(error Pre-built object $@ is missing))
