@@ -62,9 +62,9 @@ fn font_fromFile(T : tea_State*) : void
     }
 }
 
-from embed::font_ttf import *
+from embed::font_ttf import font_ttf
 
-let f = font_ttf; //bug...
+let f : const uint8* = font_ttf; //bug...
 
 fn font_fromEmbedded(T : tea_State*) : void
 {
