@@ -79,6 +79,8 @@ function micro.run()
     return run()
 }
 
+micro.fs.mount('.')
+
 /*
 import sys, os
 
@@ -109,16 +111,16 @@ else
 }*/
 
 var data = {}
-/*if micro.fs.exists("conf.tea")
+if micro.fs.exists("conf.tea")
 {
     import 'conf' as mod
     if hasattr(mod, 'conf') and mod.conf is Map
     {
         data = mod.conf
     }
-}*/
+}
 
-const conf = merge({
+const conf = merge(data, {
     title = 'micro',
     width = 200,
     height = 200,
@@ -127,22 +129,21 @@ const conf = merge({
         height = 800
     },
     maxfps = 60
-}, data)
+})
 
-print(conf)
 micro.gfx.init(conf['width'], conf['height'])
 micro.gfx.setClearColor(0, 0, 0)
 micro.window.setTitle(conf['title'])
-//micro.window.setSize(conf['window']['width'], conf['window']['height'])
+micro.window.setSize(conf['window']['width'], conf['window']['height'])
 //micro.gfx.setMaxFps(conf['maxfps'])
 //micro.audio.init()
 
 print("inited?")
 
-//if micro.fs.exists("main.tea")
-//{
+if micro.fs.exists("main.tea")
+{
     // Load project file
     import "main"
-//}
+}
 
 call(micro, "load")

@@ -16,7 +16,7 @@ function micro.load()
 {
     print('loading')
     //micro.event.quit()
-    micro.window.setTitle("a very funny title title")
+    //micro.window.setTitle("a very funny title title")
     print("timer", micro.timer.getTime())
     //micro.gfx.setClearColor(155, 155, 155)
     d = micro.Data.fromString('hello world from Data\n\0')
@@ -58,6 +58,13 @@ function micro.load()
     //print(s1)
     s2 = micro.data.decompress(s1)
     print(s2)
+
+    if micro.fs.exists("main.tea") { print('yes filesystem!') }
+    if micro.fs.exists("wizard_red_staff.png") { print('yes filesystem!') }
+    if micro.fs.exists("conf.tea") { print('conf???') }
+
+    //var x = micro.fs.listDir('embed')
+    //print(x)
 }
 
 function micro.update(dt)

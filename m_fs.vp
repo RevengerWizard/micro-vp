@@ -1,0 +1,169 @@
+import std::mem as mem
+
+from tea import *
+
+from fs import *
+
+fn check_error(T : tea_State*, err : int32, str : const uint8*) : void
+{
+    if err == 0 return;
+    if err == FS_ENOWRITEPATH or str == nil
+    {
+        //tea_error(T, "%s", fs_errorStr(err));
+        tea_error(T, "err1 FS_ENOWRITEPATH");
+    }
+    //tea_error(T, "%s '%s'", fs_errorStr(err), str);
+    tea_error(T, "err2 FS");
+}
+
+fn filesystem_mount(T : tea_State*) : void
+{
+    let path : const uint8* = tea_check_string(T, 0);
+    let res : int32 = fs_mount(path);
+    if res != FS_ESUCCESS
+    {
+        tea_push_false(T);
+    }
+    else
+    {
+        tea_push_true(T);
+    }
+}
+
+fn filesystem_unmount(T : tea_State*) : void
+{
+    let path : const uint8* = tea_check_string(T, 0);
+    fs_unmount(path);
+}
+
+fn filesystem_setWritePath(T : tea_State*) : void
+{
+    let path : const uint8* = tea_check_string(T, 0);
+    let res : int32 = fs_setWritePath(path);
+    check_error(T, res, path);
+}
+
+fn filesystem_exists(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    tea_push_bool(T, fs_exists(filename));
+}
+
+fn filesystem_read(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let len : usize;
+    let data : uint8* = fs_read(filename, &len);
+    if data == nil
+    {
+        //tea_error(T, "could not read file '%s'", filename);
+        tea_error(T, "could not read file");
+    }
+    tea_push_lstring(T, data, len);
+    mem::free(data);
+}
+
+fn filesystem_write(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let len : usize;
+    let data : const uint8* = tea_check_lstring(T, 1, &len);
+    let res : int32 = fs_write(filename, data, len);
+    check_error(T, res, filename);
+}
+
+fn filesystem_delete(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let res : int32 = fs_delete(filename);
+    if res != FS_ESUCCESS
+    {
+        tea_push_false(T);
+    }
+    else
+    {
+        tea_push_true(T);
+    }
+}
+
+fn filesystem_getSize(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let sz : usize;
+    let res : int32 = fs_size(filename, &sz);
+    check_error(T, res, filename);
+    tea_push_number(T, floatcast(tea_Number, sz));
+}
+
+fn filesystem_getModified(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    var t : uint32;
+    let res : int32 = fs_modified(filename, &t);
+    check_error(T, res, filename);
+    tea_push_number(T, floatcast(tea_Number, t));
+}
+
+fn filesystem_isDir(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    tea_push_bool(T, fs_isDir(filename));
+}
+
+fn filesystem_listDir(T : tea_State*) : void
+{
+    let path : const uint8* = tea_check_string(T, 0);
+    let list : fs_FileListNode* = fs_listDir(path);
+    tea_new_list(T, 0);
+    var n : fs_FileListNode* = list;
+    while n != nil
+    {
+        tea_push_string(T, n.name);
+        tea_add_item(T, -2);
+        n = n.next;
+    }
+    fs_freeFileList(list);
+}
+
+fn filesystem_append(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let len : usize;
+    let data : const uint8* = tea_check_lstring(T, 1, &len);
+    let res : int32 = fs_append(filename, data, len);
+    check_error(T, res, filename);
+}
+
+fn filesystem_makeDirs(T : tea_State*) : void
+{
+    let path : const uint8* = tea_check_string(T, 0);
+    let res : int32 = fs_makeDirs(path);
+    if res != FS_ESUCCESS
+    {
+        //tea_error(T, "%s '%s'", fs_errorStr(res), path);
+        tea_error(T, "error makeDirs");
+    }
+}
+
+let freg : tea_Reg[] = {
+    {"mount", filesystem_mount, 1, 0},
+    {"unmount", filesystem_unmount, 1, 0},
+    {"setWritePath", filesystem_setWritePath, 1, 0},
+    {"read", filesystem_read, 1, 0},
+    {"exists", filesystem_exists, 1, 0},
+    {"write", filesystem_write, 2, 0},
+    {"delete", filesystem_delete, 1, 0},
+    {"getSize", filesystem_getSize, 1, 0},
+    {"getModified", filesystem_getModified, 1, 0},
+    {"isDir", filesystem_isDir, 1, 0},
+    {"listDir", filesystem_listDir, 1, 0},
+    {"append", filesystem_append, 2, 0},
+    {"makeDirs", filesystem_makeDirs, 1, 0},
+    {}
+};
+
+pub fn micro_open_fs(T : tea_State*) : void
+{
+    tea_create_submodule(T, "fs", freg);
+    //atexit(fs_deinit);
+}

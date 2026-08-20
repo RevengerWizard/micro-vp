@@ -11,6 +11,8 @@ SRCS = 	micro.vp \
 		m_data.vp \
 		m_image.vp \
 		m_font.vp \
+		m_fs.vp \
+		m_mouse.vp \
        	spxe.vp \
         gleq.vp \
         stb_image.vp \

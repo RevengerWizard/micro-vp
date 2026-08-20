@@ -1,0 +1,70 @@
+from tea import *
+
+let inited : bool = false;
+let samplerate : float64 = 0;
+
+/*fn audio_callback(pDevice : ma_device*, pOutput : void*, pInput : const void*, frameCount : ma_uint32) : void
+{
+    let T : tea_State* = ptrcast(tea_State*, pDevice.pUserData);
+    let buffer : int16_t* = ptrcast(int16_t*, pOutput);
+    let len : int32 = frameCount * pDevice.playback.channels;
+    var i : int32;
+    //UNUSED(T);
+
+    /* Process source commands */
+    source_processCommands();
+    /* Process sources audio */
+    source_processAllSources(len);
+    /* Copy master to buffer */
+    let master : Source* = source_getMaster(nil);
+    for i = 0; i < len; i++
+    {
+        let x : int32 = master->buf[i];
+        buffer[i] = CLAMP(x, -32768, 32767);
+    }
+
+    //UNUSED(pInput);
+}*/
+
+fn audio_init(T : tea_State*) : void
+{
+    let rate : int32 = intcast(int32, tea_opt_integer(T, 0, 44100));
+    let bufferSize : int32 = intcast(int32, tea_opt_integer(T, 1, 44100));
+    //UNUSED(bufferSize);
+    if inited
+    {
+        tea_error(T, "audio is already inited");
+    }
+
+    /*ma_device_config config;
+    config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format = ma_format_s16;
+    config.playback.channels = 2;
+    config.sampleRate = rate;
+    config.dataCallback = audio_callback;
+    config.pUserData = T;
+
+    if ma_device_init(nil, &config, &device) != MA_SUCCESS
+    {
+        tea_error(T, "could not init audio");
+    }*/
+
+    samplerate = rate;
+    inited = true;
+    /*source_setSamplerate(samplerate);
+
+    if ma_device_start(&device) != MA_SUCCESS
+    {
+        tea_error(T, "could not start audio");
+    }*/
+}
+
+let areg : tea_Reg = {
+    {"init", audio_init, 0, 2},
+    {}
+}
+
+pub fn micro_open_audio(T : tea_State*) : void
+{
+    tea_create_submodule(T, "audio", areg)
+}

@@ -1,0 +1,13 @@
+from tea import *
+
+let mreg : tea_Reg[] = {
+    //{ "isVisible", mouse_isVisible, 0, 0 },
+    //{ "setVisible", mouse_setVisible, 1, 0 },
+    //{ "setPosition", mouse_setPosition, 2, 0 },
+    {}
+};
+
+pub fn micro_open_mouse(T : tea_State*) : void
+{
+    tea_create_submodule(T, "mouse", mreg);
+}

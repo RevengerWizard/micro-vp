@@ -16,24 +16,14 @@ from m_gfx import micro_open_gfx
 from m_font import micro_open_Font
 from m_data import micro_open_Data, micro_open_data
 from m_image import micro_open_Image
+from m_fs import micro_open_fs
+from m_mouse import micro_open_mouse
 
 pub def WIDTH = 200;
 pub def HEIGHT = 200;
 
 pub var pixbuf : Px*?;
 pub var screen : sr_Buffer*?;
-
-let mreg : tea_Reg[] = {
-    //{ "isVisible", mouse_isVisible, 0, 0 },
-    //{ "setVisible", mouse_setVisible, 1, 0 },
-    //{ "setPosition", mouse_setPosition, 2, 0 },
-    {}
-};
-
-fn micro_open_mouse(T : tea_State*) : void
-{
-    tea_create_submodule(T, "mouse", mreg);
-}
 
 fn micro_open_keyboard(T : tea_State*) : void
 {
@@ -58,6 +48,7 @@ let mods : Mods[] = {
     {"timer", micro_open_timer},
     {"window", micro_open_window},
     {"gfx", micro_open_gfx},
+    {"fs", micro_open_fs},
     {}
 };
 

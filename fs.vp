@@ -1,25 +1,768 @@
 import std::mem as mem
+import std::str as str
 import std::io as io
-from std::io import SeekPos, FILE, OpenMode
+from std::io import FILE, OpenMode, SeekPos
 
-pub fn fs_read(filename : const uint8*, len : usize*) : void*?
+from miniz import *
+from windows import *
+
+pub struct fs_FileListNode
 {
-    let f : FILE*? = io::open(filename, OpenMode::READ, nil);
-    if f == nil return nil;
+    name : uint8*;
+    next : fs_FileListNode*?;
+}
 
-    let size : usize = io::seek(f, 0, SeekPos::END, nil);
-    io::seek(f, 0, SeekPos::SET, nil);
+struct PathNode
+{
+    next : PathNode*?;
+    kind : int32;
+    zip  : mz_zip_archive;
+    path : uint8[1];   // flexible tail
+}
 
-    let buf : void* = mem::alloc(size);
-    if buf == nil
+pub def FS_ESUCCESS =  0;
+pub def FS_EFAILURE = -1;
+pub def FS_EOUTOFMEM = -2;
+pub def FS_EBADPATH = -3;
+pub def FS_EBADFILENAME = -4;
+pub def FS_ENOWRITEPATH = -5;
+pub def FS_ECANTOPEN = -6;
+pub def FS_ECANTREAD = -7;
+pub def FS_ECANTWRITE = -8;
+pub def FS_ECANTDELETE = -9;
+pub def FS_ECANTMKDIR = -10;
+pub def FS_ENOTEXIST = -11;
+
+def PATH_TDIR = 0;
+def PATH_TZIP = 1;
+
+var mounts : PathNode*? = nil;
+var writePath : PathNode*? = nil;
+
+fn miniz_alloc(opaque : void*, items : usize, size : usize) : void*
+{
+    return mem::alloc(items * size);
+}
+
+fn miniz_free(opaque : void*, address : void*) : void
+{
+    mem::free(address);
+}
+
+fn miniz_realloc(opaque : void*, address : void*, items : usize, size : usize) : void*
+{
+    return mem::realloc(address, items * size);
+}
+
+fn str_eq(a : const uint8*, b : const uint8*) : bool
+{
+    let la : usize = str::len(a);
+    let lb : usize = str::len(b);
+    if la != lb return false;
+    return mem::cmp(a, b, la) == 0;
+}
+
+fn str_starts_with(s : const uint8*, prefix : const uint8*) : bool
+{
+    let lp : usize = str::len(prefix);
+    if str::len(s) < lp return false;
+    return mem::cmp(s, prefix, lp) == 0;
+}
+
+// Append src into dst. dst must have capacity. Returns new length.
+fn str_append(dst : uint8*, dst_len : usize, src : const uint8*, src_len : usize) : usize
+{
+    mem::copy(dst + dst_len, src, src_len);
+    dst[dst_len + src_len] = 0u8;
+    return dst_len + src_len;
+}
+
+fn str_contains_sep(s : const uint8*) : bool
+{
+    var p : const uint8* = s;
+    while *p != 0u8
     {
-        io::close(f, nil);
-        return nil;
+        if *p == cast(uint8, '/') or *p == cast(uint8, '\\') return true;
+        p = p + 1;
+    }
+    return false;
+}
+
+fn is_sep(c : uint8) : bool
+{
+    return c == cast(uint8, '/') or c == cast(uint8, '\\');
+}
+
+// Build "a/b" into a freshly allocated buffer. Caller frees.
+fn path_join(a : const uint8*, b : const uint8*) : uint8*?
+{
+    let la : usize = str::len(a);
+    let lb : usize = str::len(b);
+    let buf : uint8*? = ptrcast(uint8*, mem::alloc(la + 1uz + lb + 1uz));
+    if buf == nil return nil;
+    var n : usize = 0;
+    n = str_append(buf, n, a, la);
+    buf[n] = cast(uint8, '/');
+    n = n + 1;
+    n = str_append(buf, n, b, lb);
+    return buf;
+}
+
+// --------------------------------------------------------- Windows helpers --
+
+// Returns true if path is an existing directory.
+fn win_is_dir(path : const uint8*) : bool
+{
+    let attr : uint32 = GetFileAttributesA(path);
+    if attr == INVALID_FILE_ATTRIBUTES return false;
+    return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+// Create a single directory (not recursive).
+fn win_mkdir(path : const uint8*) : bool
+{
+    return CreateDirectoryA(path, nil) != 0;
+}
+
+// Stat-equivalent: fills mtime (Windows FILETIME low 32 bits) and size.
+fn win_file_info(
+    path : const uint8*,
+    out_mtime : uint32*?,
+    out_size  : usize*?,
+    out_isdir : int32*?) : bool
+{
+    let h : HANDLE = CreateFileA(
+        path,
+        GENERIC_READ_FLAG,
+        FILE_SHARE_READ_FLAG | FILE_SHARE_WRITE_FLAG,
+        nil,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS,
+        nil);
+    if h == ptrcast(HANDLE, -1)/*INVALID_HANDLE_VALUE*/ return false;
+
+    var fi : BY_HANDLE_FILE_INFORMATION;
+    let ok : bool = GetFileInformationByHandle(h, &fi) != 0;
+    CloseHandle(h);
+    if !ok return false;
+
+    if out_mtime != nil { *out_mtime = fi.ftLastWriteTime.dwLowDateTime; }
+    if out_size  != nil { *out_size  = intcast(usize, fi.nFileSizeLow); }
+    if out_isdir != nil
+    {
+        *out_isdir = ((fi.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) ? 1 : 0;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------- makeDirs (win) --
+
+fn makeDirs(path : const uint8*) : int32
+{
+    let path_len : usize = str::len(path);
+    // +2 for trailing "/" sentinel
+    let buf : uint8*? = ptrcast(uint8*, mem::alloc(path_len + 2uz));
+    if buf == nil return FS_EOUTOFMEM;
+
+    mem::copy(buf, path, path_len + 1uz);
+    // Append trailing separator to flush the last segment in the loop
+    buf[path_len]      = cast(uint8, '/');
+    buf[path_len + 1] = 0u8;
+
+    var err : int32 = FS_ESUCCESS;
+    var p : uint8* = buf;
+
+    // Skip leading '/'
+    if *p == cast(uint8, '/') { p = p + 1; }
+    // Skip Windows drive letter "C:\"
+    if p[0] != 0u8 and p[1] == cast(uint8, ':') and p[2] == cast(uint8, '\\')
+    {
+        p = p + 3;
     }
 
-    io::read(f, ptrcast(uint8*, buf), size, nil);
-    io::close(f, nil);
+    while *p != 0u8
+    {
+        if is_sep(*p)
+        {
+            let saved : uint8 = *p;
+            *p = 0u8;
+            if !win_is_dir(buf)
+            {
+                if !win_mkdir(buf)
+                {
+                    err = FS_ECANTMKDIR;
+                    *p = saved;
+                    mem::free(buf);
+                    return err;
+                }
+            }
+            *p = cast(uint8, '/');
+        }
+        p = p + 1;
+    }
 
-    if len != nil { *len = size; }
-    return buf;
+    mem::free(buf);
+    return err;
+}
+
+// ------------------------------------------------------- PathNode helpers ---
+
+fn newNode(path : const uint8*) : PathNode*?
+{
+    let len : usize = str::len(path);
+    // sizeof(PathNode) already has 1 byte for path[], so add len bytes extra
+    let p : PathNode*? = ptrcast(PathNode*, mem::alloc(sizeof(PathNode) + len));
+    if p == nil return nil;
+    mem::set(p, 0, sizeof(PathNode) + len);
+
+    mem::copy(&p.path[0], path, len + 1uz);
+    // Trim trailing separator
+    if len > 0uz and is_sep(p.path[len - 1uz])
+    {
+        p.path[len - 1uz] = 0u8;
+    }
+
+    if win_is_dir(&p.path[0])
+    {
+        p.kind = PATH_TDIR;
+    }
+    else
+    {
+        p.kind = PATH_TZIP;
+        // Inject our allocator before opening
+        p.zip.m_pAlloc = miniz_alloc;
+        p.zip.m_pFree = miniz_free;
+        p.zip.m_pRealloc = miniz_realloc;
+        if mz_zip_reader_init_file(&p.zip, path, 0) == 0
+        {
+            mem::free(p);
+            return nil;
+        }
+    }
+    return p;
+}
+
+fn destroyNode(p : PathNode*) : void
+{
+    if p.kind == PATH_TZIP
+    {
+        mz_zip_reader_end(&p.zip);
+    }
+    mem::free(p);
+}
+
+// ------------------------------------------------------- filename checks ----
+
+fn checkFilename(filename : const uint8*) : int32
+{
+    if *filename == cast(uint8, '/') return FS_EFAILURE;
+    // Check for ".."
+    var p : const uint8* = filename;
+    while *p != 0u8
+    {
+        if p[0] == cast(uint8, '.') and p[1] == cast(uint8, '.')
+        {
+            return FS_EFAILURE;
+        }
+        // Check for ":\\"
+        if p[1] == cast(uint8, ':') and p[2] == cast(uint8, '\\')
+        {
+            return FS_EFAILURE;
+        }
+        p = p + 1;
+    }
+    return FS_ESUCCESS;
+}
+
+fn skipDotSlash(filename : const uint8*) : const uint8*
+{
+    if filename[0] == cast(uint8, '.') and is_sep(filename[1])
+    {
+        return filename + 2;
+    }
+    return filename;
+}
+
+// ------------------------------------------------------ public interface ----
+
+pub fn fs_errorStr(err : int32) : const uint8*
+{
+    switch err
+    case FS_ESUCCESS return "success";
+    case FS_EFAILURE return "failure";
+    case FS_EOUTOFMEM return "out of memory";
+    case FS_EBADPATH return "bad path";
+    case FS_EBADFILENAME return "bad filename";
+    case FS_ENOWRITEPATH return "no write path set";
+    case FS_ECANTOPEN return "could not open file";
+    case FS_ECANTREAD return "could not read file";
+    case FS_ECANTWRITE return "could not write file";
+    case FS_ECANTDELETE return "could not delete file";
+    case FS_ECANTMKDIR return "could not make directory";
+    case FS_ENOTEXIST return "file or directory does not exist";
+    default return "unknown error";
+}
+
+pub fn fs_deinit() : void
+{
+    while mounts != nil
+    {
+        let next : PathNode*? = mounts.next;
+        destroyNode(mounts);
+        mounts = next;
+    }
+    if writePath != nil
+    {
+        destroyNode(writePath);
+        writePath = nil;
+    }
+}
+
+pub fn fs_mount(path : const uint8*) : int32
+{
+    // Validate: must be a directory or a valid zip
+    var zip : mz_zip_archive;
+    mem::set(&zip, 0, sizeof(mz_zip_archive));
+    zip.m_pAlloc = miniz_alloc;
+    zip.m_pFree = miniz_free;
+    zip.m_pRealloc = miniz_realloc;
+    if !win_is_dir(path) and mz_zip_reader_init_file(&zip, path, 0) == 0
+    {
+        return FS_EBADPATH;
+    }
+    mz_zip_reader_end(&zip);
+
+    // Already mounted?
+    var p : PathNode*? = mounts;
+    while p != nil
+    {
+        if str_eq(&p.path[0], path) return FS_ESUCCESS;
+        p = p.next;
+    }
+
+    let node : PathNode*? = newNode(path);
+    if node == nil return FS_EOUTOFMEM;
+    node.next = mounts;
+    mounts = node;
+    return FS_ESUCCESS;
+}
+
+pub fn fs_unmount(path : const uint8*) : int32
+{
+    var prev : PathNode*? = nil;
+    var cur  : PathNode*? = mounts;
+    while cur != nil
+    {
+        if str_eq(&cur.path[0], path)
+        {
+            if prev == nil { mounts = cur.next; }
+            else { prev.next = cur.next; }
+            destroyNode(cur);
+            return FS_ESUCCESS;
+        }
+        prev = cur;
+        cur  = cur.next;
+    }
+    return FS_ESUCCESS;
+}
+
+pub fn fs_setWritePath(path : const uint8*) : int32
+{
+    let err : int32 = makeDirs(path);
+    if !win_is_dir(path)
+    {
+        return (err != FS_ESUCCESS) ? FS_ECANTMKDIR : FS_EBADPATH;
+    }
+    let node : PathNode*? = newNode(path);
+    if node == nil return FS_EOUTOFMEM;
+    if writePath != nil { destroyNode(writePath); }
+    writePath = node;
+    return FS_ESUCCESS;
+}
+
+// ---------------------------------------------------------------- fileInfo --
+
+fn fileInfo(
+    filename  : const uint8*,
+    out_mtime : uint32*?,
+    out_size  : usize*?,
+    out_isdir : int32*?) : int32
+{
+    if checkFilename(filename) != FS_ESUCCESS return FS_EBADFILENAME;
+    filename = skipDotSlash(filename);
+
+    var p : PathNode*? = mounts;
+    while p != nil
+    {
+        if p.kind == PATH_TDIR
+        {
+            let full : uint8*? = path_join(&p.path[0], filename);
+            if full == nil return FS_EOUTOFMEM;
+            let ok : bool = win_file_info(full, out_mtime, out_size, out_isdir);
+            mem::free(full);
+            if ok return FS_ESUCCESS;
+        }
+        else
+        {
+            let idx : int32 = mz_zip_reader_locate_file(&p.zip, filename, nil, 0);
+            if idx != -1
+            {
+                if out_mtime != nil or out_size != nil
+                {
+                    var s : mz_zip_archive_file_stat;
+                    mz_zip_reader_file_stat(&p.zip, intcast(uint32, idx), &s);
+                    if out_mtime != nil { *out_mtime = intcast(uint32, s.m_time); }
+                    if out_size  != nil { *out_size  = intcast(usize, s.m_uncomp_size); }
+                }
+                if out_isdir != nil
+                {
+                    *out_isdir = mz_zip_reader_is_file_a_directory(&p.zip, intcast(uint32, idx)) != 0 ? 1 : 0;
+                }
+                return FS_ESUCCESS;
+            }
+        }
+        p = p.next;
+    }
+    return FS_ENOTEXIST;
+}
+
+pub fn fs_exists(filename : const uint8*) : bool
+{
+    return fileInfo(filename, nil, nil, nil) == FS_ESUCCESS;
+}
+
+pub fn fs_modified(filename : const uint8*, mtime : uint32*) : int32
+{
+    return fileInfo(filename, mtime, nil, nil);
+}
+
+pub fn fs_size(filename : const uint8*, size : usize*) : int32
+{
+    return fileInfo(filename, nil, size, nil);
+}
+
+pub fn fs_isDir(filename : const uint8*) : bool
+{
+    var res : int32 = 0;
+    let err : int32 = fileInfo(filename, nil, nil, &res);
+    if err != FS_ESUCCESS return false;
+    return res != 0;
+}
+
+// ----------------------------------------------------------------- fs_read --
+
+pub fn fs_read(filename : const uint8*, out_len : usize*?) : void*?
+{
+    var len_ : usize = 0;
+    let len : usize* = (out_len != nil) ? out_len : &len_;
+
+    if checkFilename(filename) != FS_ESUCCESS return nil;
+    filename = skipDotSlash(filename);
+
+    var p : PathNode*? = mounts;
+    while p != nil
+    {
+        if p.kind == PATH_TDIR
+        {
+            let full : uint8*? = path_join(&p.path[0], filename);
+            if full == nil return nil;
+
+            let h : HANDLE = CreateFileA(
+                full,
+                GENERIC_READ_FLAG,
+                FILE_SHARE_READ_FLAG,
+                nil,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                nil);
+            mem::free(full);
+
+            if h == ptrcast(HANDLE, -1)/*INVALID_HANDLE_VALUE*/
+            {
+                p = p.next;
+                continue;
+            }
+
+            var size_hi : uint32 = 0;
+            let size_lo : uint32 = GetFileSize(h, &size_hi);
+            *len = intcast(usize, size_lo);
+
+            let buf : uint8*? = ptrcast(uint8*, mem::alloc(*len + 1uz));
+            if buf == nil
+            {
+                CloseHandle(h);
+                return nil;
+            }
+            buf[*len] = 0u8;
+
+            var read : uint32 = 0;
+            let ok : bool = ReadFile(h, buf, intcast(uint32, *len), &read, nil) != 0;
+            CloseHandle(h);
+
+            if !ok or intcast(usize, read) != *len
+            {
+                mem::free(buf);
+                return nil;
+            }
+            return buf;
+        }
+        else
+        {
+            let buf : void*? = mz_zip_reader_extract_file_to_heap(&p.zip, filename, len, 0);
+            if buf != nil return buf;
+        }
+        p = p.next;
+    }
+    return nil;
+}
+
+// --------------------------------------------------------- fs_FileListNode --
+
+fn newFileListNode(name : const uint8*) : fs_FileListNode*?
+{
+    let name_len : usize = str::len(name);
+    // Allocate node + name string together
+    let n : fs_FileListNode*? = ptrcast(
+        fs_FileListNode*,
+        mem::alloc(sizeof(fs_FileListNode) + name_len + 1));
+    if n == nil return nil;
+    n.next = nil;
+    // name sits right after the struct
+    n.name = ptrcast(uint8*, n + 1);
+    mem::copy(n.name, name, name_len + 1);
+    return n;
+}
+
+fn appendFileListNode(list : fs_FileListNode**?, name : const uint8*) : int32
+{
+    var n : fs_FileListNode** = list;
+    while *n != nil
+    {
+        if str_eq((*n).name, name) return FS_ESUCCESS;
+        n = &(*n).next;
+    }
+    *n = newFileListNode(name);
+    if *n == nil return FS_EOUTOFMEM;
+    return FS_ESUCCESS;
+}
+
+pub fn fs_freeFileList(list : fs_FileListNode*?) : void
+{
+    while list != nil
+    {
+        let next : fs_FileListNode*? = list.next;
+        mem::free(list);
+        list = next;
+    }
+}
+
+pub fn fs_listDir(path : const uint8*) : fs_FileListNode*?
+{
+    if checkFilename(path) != FS_ESUCCESS return nil;
+
+    // Trim trailing separator and handle "."
+    let path_len : usize = str::len(path);
+    let trimmed : uint8*? = ptrcast(uint8*, mem::alloc(path_len + 1));
+    if trimmed == nil return nil;
+    mem::copy(trimmed, path, path_len + 1);
+
+    var trimmed_len : usize = path_len;
+    if trimmed_len > 0uz and is_sep(trimmed[trimmed_len - 1])
+    {
+        trimmed_len = trimmed_len - 1uz;
+        trimmed[trimmed_len] = 0u8;
+    }
+    if str_eq(trimmed, ".")
+    {
+        trimmed[0] = 0u8;
+        trimmed_len = 0uz;
+    }
+
+    var res : fs_FileListNode*? = nil;
+    var err : int32 = FS_ESUCCESS;
+
+    var p : PathNode*? = mounts;
+    while p != nil and err == FS_ESUCCESS
+    {
+        if p.kind == PATH_TDIR
+        {
+            let dir_path : uint8*? = path_join(&p.path[0], trimmed);
+            if dir_path == nil { err = FS_EOUTOFMEM; }
+            else
+            {
+                let find_path : uint8*? = ptrcast(uint8*, mem::alloc(str::len(dir_path) + 3));
+                if find_path == nil
+                {
+                    mem::free(dir_path);
+                    err = FS_EOUTOFMEM;
+                }
+                else
+                {
+                    let dp_len : usize = str::len(dir_path);
+                    mem::copy(find_path, dir_path, dp_len);
+                    find_path[dp_len] = cast(uint8, '/');
+                    find_path[dp_len + 1] = cast(uint8, '*');
+                    find_path[dp_len + 2] = 0u8;
+                    mem::free(dir_path);
+
+                    var ffd : WIN32_FIND_DATAA;
+                    let hfind : HANDLE = FindFirstFileA(find_path, &ffd);
+                    mem::free(find_path);
+
+                    if hfind != ptrcast(HANDLE, -1)/*INVALID_HANDLE_VALUE*/
+                    {
+                        var cont : bool = true;
+                        while cont
+                        {
+                            let entry_name : const uint8* = &ffd.cFileName[0];
+                            if !str_eq(entry_name, ".") and !str_eq(entry_name, "..")
+                            {
+                                if appendFileListNode(&res, entry_name) != FS_ESUCCESS
+                                {
+                                    err = FS_EOUTOFMEM;
+                                    cont = false;
+                                }
+                            }
+                            if cont
+                            {
+                                cont = FindNextFileA(hfind, &ffd) != 0i32;
+                            }
+                        }
+                        FindClose(hfind);
+                    }
+                }
+            }
+        }
+        else
+        {
+            let nfiles : uint32 = mz_zip_reader_get_num_files(&p.zip);
+            var i : uint32 = 0;
+            while i < nfiles and err == FS_ESUCCESS
+            {
+                var s : mz_zip_archive_file_stat;
+                mz_zip_reader_file_stat(&p.zip, i, &s);
+
+                let fname : const uint8* = &s.m_filename[0];
+                let matches : bool =
+                    trimmed_len == 0uz or
+                    (str_starts_with(fname, trimmed) and is_sep(fname[trimmed_len]));
+
+                if matches
+                {
+                    // Strip prefix and leading separator
+                    var entry : uint8* = ptrcast(uint8*, fname) + trimmed_len;
+                    if *entry != 0u8 and is_sep(*entry) { entry = entry + 1; }
+
+                    // Strip trailing separator (directory marker in zip)
+                    let elen : usize = str::len(entry);
+                    var entry_buf : uint8[512];
+                    if elen < 512uz
+                    {
+                        mem::copy(&entry_buf[0], entry, elen + 1uz);
+                        if elen > 0uz and is_sep(entry_buf[elen - 1uz])
+                        {
+                            entry_buf[elen - 1uz] = 0u8;
+                        }
+                        let clean : const uint8* = &entry_buf[0];
+                        if *clean != 0u8 and !str_contains_sep(clean)
+                        {
+                            if appendFileListNode(&res, clean) != FS_ESUCCESS
+                            {
+                                err = FS_EOUTOFMEM;
+                            }
+                        }
+                    }
+                }
+                i = i + 1u32;
+            }
+        }
+        p = p.next;
+    }
+
+    mem::free(trimmed);
+
+    if err != FS_ESUCCESS
+    {
+        fs_freeFileList(res);
+        return nil;
+    }
+    return res;
+}
+
+// ------------------------------------------------------------------ writes --
+
+fn writeUsingMode(
+    filename : const uint8*,
+    append   : bool,
+    data     : const void*,
+    size     : usize) : int32
+{
+    if writePath == nil return FS_ENOWRITEPATH;
+    if checkFilename(filename) != FS_ESUCCESS return FS_EBADFILENAME;
+
+    let full : uint8*? = path_join(&writePath.path[0], filename);
+    if full == nil return FS_EOUTOFMEM;
+
+    let flags : uint32 = append
+        ? OPEN_ALWAYS
+        : CREATE_ALWAYS;
+
+    let h : HANDLE = CreateFileA(
+        full,
+        GENERIC_WRITE,
+        0,
+        nil,
+        flags,
+        FILE_ATTRIBUTE_NORMAL,
+        nil);
+    mem::free(full);
+
+    if h == ptrcast(HANDLE, -1)/*INVALID_HANDLE_VALUE*/ return FS_ECANTOPEN;
+
+    if append
+    {
+        SetFilePointer(h, 0i32, nil, FILE_END_D);
+    }
+
+    var written : uint32 = 0;
+    let ok : bool = WriteFile(h, data, intcast(uint32, size), &written, nil) != 0;
+    CloseHandle(h);
+
+    return (ok and intcast(usize, written) == size) ? FS_ESUCCESS : FS_ECANTWRITE;
+}
+
+pub fn fs_write(filename : const uint8*, data : const void*, size : usize) : int32
+{
+    return writeUsingMode(filename, false, data, size);
+}
+
+pub fn fs_append(filename : const uint8*, data : const void*, size : usize) : int32
+{
+    return writeUsingMode(filename, true, data, size);
+}
+
+pub fn fs_delete(filename : const uint8*) : int32
+{
+    if writePath == nil return FS_ENOWRITEPATH;
+    if checkFilename(filename) != FS_ESUCCESS return FS_EBADFILENAME;
+
+    let full : uint8*? = path_join(&writePath.path[0], filename);
+    if full == nil return FS_EOUTOFMEM;
+
+    let ok : bool = DeleteFileA(full) != 0;
+    mem::free(full);
+    return ok ? FS_ESUCCESS : FS_ECANTDELETE;
+}
+
+pub fn fs_makeDirs(path : const uint8*) : int32
+{
+    if writePath == nil return FS_ENOWRITEPATH;
+    if checkFilename(path) != FS_ESUCCESS return FS_EBADFILENAME;
+
+    let full : uint8*? = path_join(&writePath.path[0], path);
+    if full == nil return FS_EOUTOFMEM;
+
+    let err : int32 = makeDirs(full);
+    mem::free(full);
+    return err;
 }
