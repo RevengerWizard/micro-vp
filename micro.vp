@@ -59,7 +59,7 @@ let mods : Mods[] = {
 };
 
 from embed::graphics_tea import *
-//from embed::keyboard_tea import *
+from embed::keyboard_tea import *
 from embed::mouse_tea import *
 from embed::timer_tea import *
 from embed::init_tea import *
@@ -77,6 +77,7 @@ struct Items
 }
 let items : Items[] = {
     {"graphics.tea", graphics_tea, sizeof(typeof(graphics_tea))},
+    {"keyboard.tea", keyboard_tea, sizeof(typeof(keyboard_tea))},
     {"mouse.tea", mouse_tea, sizeof(typeof(mouse_tea))},
     {"timer.tea", timer_tea, sizeof(typeof(timer_tea))},
     {"init.tea", init_tea, sizeof(typeof(init_tea))},

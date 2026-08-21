@@ -72,8 +72,13 @@ function micro.load()
 
 function micro.update(dt)
 {
-    //print('updating', dt)
     //print('fps', micro.timer.getFps())
+    //
+    if micro.keyboard.isDown('g')
+    {
+        print("mini monkeys")
+        print('updating', dt)
+    }
 }
 
 function circle(cx, cy, r)
