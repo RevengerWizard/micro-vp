@@ -546,9 +546,9 @@ fn blendPixel(m : sr_DrawMode*, d : sr_Pixel*, s : sr_Pixel) : void
     // Color modulation
     if m.color.word != SR_RGB_MASK
     {
-        s.r = (s.r * m.color.r) >> 8;
-        s.g = (s.g * m.color.g) >> 8;
-        s.b = (s.b * m.color.b) >> 8;
+        s.r = intcast(uint8, intcast(int32, s.r) * intcast(int32, m.color.r) >> 8);
+        s.g = intcast(uint8, intcast(int32, s.g) * intcast(int32, m.color.g) >> 8);
+        s.b = intcast(uint8, intcast(int32, s.b) * intcast(int32, m.color.b) >> 8);
     }
     // Blend mode
     switch m.blend
