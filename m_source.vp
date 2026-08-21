@@ -1,0 +1,31 @@
+from tea import *
+
+let srreg : const tea_Methods[] = {
+    {"fromData", "static",  source_fromData, 1, 0},
+    {"fromBlank", "static", source_fromBlank, 1, 0},
+    {"getLength", "method", source_getLength, 1, 0},
+    {"getState", "method", source_getState, 1, 0},
+    {"setDestination", "method", source_setDestination, 1, 1},
+    {"setGain", "method", source_setGain, 1, 1},
+    {"setPan", "method", source_setPan, 1, 1},
+    {"setRate", "method", source_setRate, 1, 1},
+    {"setLoop", "method", source_setLoop, 1, 1},
+    {"play", "method", source_play, 1, 1},
+    {"pause", "method", source_pause, 1, 0},
+    {"stop", "method", source_stop, 1, 0},
+    {}
+};
+
+pub fn micro_open_Source(T : tea_State*) : void
+{
+    tea_create_class(T, "Source", srreg);
+    tea_push_value(T, -1);
+    tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Source");
+    /* Set tea state */
+    //teaState = T;
+    /* Init master */
+    //master = newSource(T);
+    //masterRef = teax_ref(T, TEA_REGISTRY_INDEX);
+    //Command c = command(COMMAND_ADD, master);
+    //pushCommand(&c);
+}
