@@ -1,0 +1,338 @@
+import std::math as math
+import std::mem as mem
+
+from tea import *
+from sera import *
+from m_image import *
+
+def LERP_BITS = 10;
+def FX_BITS = 10;
+def FX_UNIT = 1 << FX_BITS;
+def FX_MASK = FX_UNIT - 1;
+
+inline fn lerp(bits : int32, a : int32, b : int32, p : int32) : int32
+{
+    return a + (((b - a) * p) >> bits);
+}
+
+inline fn clamp(x : int32, lo : int32, hi : int32) : int32
+{
+    return x < lo ? lo : (x > hi ? hi : x);
+}
+
+inline fn max(a : int32, b : int32) : int32
+{
+    return a > b ? a : b;
+}
+
+var tablesInited : bool = false;
+var tableSin : int32[FX_UNIT];
+
+fn initTables() : void
+{
+    if tablesInited return;
+    for var i : int32 = 0; i < FX_UNIT; i++
+    {
+        //tableSin[i] = intcast(int32, math::sinf32(floatcast(float32, i) / floatcast(float32, FX_UNIT) * 6.283185) * floatcast(float32, FX_UNIT));
+        tableSin[i] = intcast(int32, math::sinf32(floatcast(float32, i) / 1024.0 * 6.283185) * 1024.0);
+    }
+    tablesInited = true;
+}
+
+inline fn fxsin(n : int32) : int32
+{
+    return tableSin[n & FX_MASK];
+}
+
+fn getColorFromTable(T : tea_State*, idx : int32) : sr_Pixel
+{
+    //if tea_is_nonenil(T, idx) != false
+    if !(!(tea_get_type(T, idx) <= TEA_TYPE_NIL)) or tea_get_type(T, idx) != TEA_TYPE_LIST
+    {
+        tea_error(T, "expected list");
+    }
+    var px : sr_Pixel;
+    for var i : int32 = 0; i < 4; i++
+    {
+        tea_get_item(T, idx, i + 1);
+        var v : float32 = floatcast(float32, tea_to_number(T, -1));
+        v = floatcast(float32, clamp(intcast(int32, v * 255.0), 0, 255));
+        switch i
+        case 0 { px.r = intcast(uint8, v); }
+        case 1 { px.g = intcast(uint8, v); }
+        case 2 { px.b = intcast(uint8, v); }
+        case 3 { px.a = intcast(uint8, v); }
+        tea_pop(T, 1);
+    }
+    return px;
+}
+
+fn checkBufferSizesMatch(T : tea_State*, a : Image*, b : Image*) : void
+{
+    if a.buf.w != b.buf.w or a.buf.h != b.buf.h
+    {
+        tea_error(T, "expected buffer sizes to match");
+    }
+}
+
+fn fx_desaturate(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    var amount : int32 = intcast(int32, tea_opt_integer(T, 1, 1)) * 0xff;
+    amount = clamp(amount, 0, 0xff);
+    var i : int32 = self.buf.w * self.buf.h;
+    var p : sr_Pixel* = self.buf.pixels;
+    if amount >= 0xfe
+    {
+        while i-- != 0
+        {
+            let avg : uint8 = intcast(uint8, (intcast(int32, p.r) + intcast(int32, p.g) + intcast(int32, p.b)) * 341 >> 10);
+            p.r = avg;
+            p.g = avg;
+            p.b = avg;
+            p++;
+        }
+    }
+    else
+    {
+        while i-- != 0
+        {
+            let avg : int32 = (intcast(int32, p.r) + intcast(int32, p.g) + intcast(int32, p.b)) * 341 >> 10;
+            p.r = intcast(uint8, lerp(8, intcast(int32, p.r), avg, amount));
+            p.g = intcast(uint8, lerp(8, intcast(int32, p.g), avg, amount));
+            p.b = intcast(uint8, lerp(8, intcast(int32, p.b), avg, amount));
+            p++;
+        }
+    }
+    tea_push_nil(T);
+}
+
+fn fx_mask(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let mask : Image* = ptrcast(Image*, tea_check_udata(T, 1, "micro.Image"));
+    let channel : const uint8* = tea_opt_string(T, 2, "a");
+    checkBufferSizesMatch(T, self, mask);
+    if channel[0] != 'r' and channel[0] != 'g' and channel[0] != 'b' and channel[0] != 'a'
+    {
+        tea_error(T, "expected channel to be 'r', 'g', 'b' or 'a'");
+    }
+    var i : int32 = self.buf.w * self.buf.h;
+    var d : sr_Pixel* = self.buf.pixels;
+    var s : sr_Pixel* = mask.buf.pixels;
+    while i-- != 0
+    {
+        switch intcast(int32, channel[0])
+        case 'r' { d.a = intcast(uint8, (intcast(int32, d.a) * intcast(int32, s.r)) >> 8); }
+        case 'g' { d.a = intcast(uint8, (intcast(int32, d.a) * intcast(int32, s.g)) >> 8); }
+        case 'b' { d.a = intcast(uint8, (intcast(int32, d.a) * intcast(int32, s.b)) >> 8); }
+        case 'a' { d.a = intcast(uint8, (intcast(int32, d.a) * intcast(int32, s.a)) >> 8); }
+        d++;
+        s++;
+    }
+    tea_push_nil(T);
+}
+
+fn fx_palette(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    //if tea_is_nonenil(T, 1) != false
+    if !(!(tea_get_type(T, 1) <= TEA_TYPE_NIL)) or tea_get_type(T, 1) != TEA_TYPE_LIST
+    {
+        tea_arg_error(T, 2, "expected list");
+    }
+    var pal : sr_Pixel[256];
+    let ncolors : int32 = intcast(int32, tea_len(T, 1));
+    if ncolors == 0
+    {
+        tea_arg_error(T, 2, "expected non-empty list");
+    }
+    for var i : int32 = 0; i < 256; i++
+    {
+        tea_get_item(T, 1, ((i * ncolors) >> 8) + 1);
+        pal[i] = getColorFromTable(T, -1);
+        tea_pop(T, 1);
+    }
+    var i : int32 = self.buf.w * self.buf.h;
+    var p : sr_Pixel* = self.buf.pixels;
+    while i-- != 0
+    {
+        let idx : int32 = max(max(intcast(int32, p.r), intcast(int32, p.b)), intcast(int32, p.g));
+        p.r = pal[idx].r;
+        p.g = pal[idx].g;
+        p.b = pal[idx].b;
+        p++;
+    }
+    tea_push_nil(T);
+}
+
+fn xorshift64star(x : uint64*) : uint64
+{
+    *x ^= *x >> 12;
+    *x ^= *x << 25;
+    *x ^= *x >> 27;
+    return *x * 2685821657736338717u64;
+}
+
+fn fx_dissolve(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    var s : uint64 = 1u64 << 32;
+    var amount : uint32 = intcast(uint32, tea_check_integer(T, 1)) * 256;
+    s |= intcast(uint64, intcast(uint32, tea_opt_integer(T, 2, 0)));
+    amount = intcast(uint32, clamp(intcast(int32, amount), 0, 0xff));
+    var i : int32 = self.buf.w * self.buf.h;
+    var p : sr_Pixel* = self.buf.pixels;
+    while i-- != 0
+    {
+        if (xorshift64star(&s) & 0xff) < intcast(uint64, amount)
+        {
+            p.a = 0;
+        }
+        p++;
+    }
+    tea_push_nil(T);
+}
+
+fn fx_wave(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let src : Image* = ptrcast(Image*, tea_check_udata(T, 1, "micro.Image"));
+    checkBufferSizesMatch(T, self, src);
+    let amountX : int32 = intcast(int32, tea_check_number(T, 2));
+    let amountY : int32 = intcast(int32, tea_check_number(T, 3));
+    let scaleX : int32 = intcast(int32, tea_check_number(T, 4) * floatcast(tea_Number, FX_UNIT));
+    let scaleY : int32 = intcast(int32, tea_check_number(T, 5) * floatcast(tea_Number, FX_UNIT));
+    let offsetX : int32 = intcast(int32, tea_opt_integer(T, 6, 0)) * FX_UNIT;
+    let offsetY : int32 = intcast(int32, tea_opt_integer(T, 7, 0)) * FX_UNIT;
+    for var y : int32 = 0; y < self.buf.h; y++
+    {
+        var d : sr_Pixel* = ptrcast(sr_Pixel*, self.buf.pixels + intcast(isize, y) * intcast(isize, self.buf.w));
+        let ox : int32 = (fxsin(offsetX + ((y * scaleX) >> FX_BITS)) * amountX) >> FX_BITS;
+        for var x : int32 = 0; x < self.buf.w; x++
+        {
+            let oy : int32 = (fxsin(offsetY + ((x * scaleY) >> FX_BITS)) * amountY) >> FX_BITS;
+            *d = sr_getPixel(src.buf, x + ox, y + oy);
+            d++;
+        }
+    }
+    tea_push_nil(T);
+}
+
+fn getChannel(px : sr_Pixel, channel : uint8) : int32
+{
+    switch intcast(int32, channel)
+    case 'r' return intcast(int32, px.r);
+    case 'g' return intcast(int32, px.g);
+    case 'b' return intcast(int32, px.b);
+    case 'a' return intcast(int32, px.a);
+    return 0;
+}
+
+fn fx_displace(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let src : Image* = ptrcast(Image*, tea_check_udata(T, 1, "micro.Image"));
+    let map : Image* = ptrcast(Image*, tea_check_udata(T, 2, "micro.Image"));
+    let channelX : const uint8* = tea_check_string(T, 3);
+    let channelY : const uint8* = tea_check_string(T, 4);
+    let scaleX : int32 = intcast(int32, tea_check_integer(T, 5)) * (1 << 7);
+    let scaleY : int32 = intcast(int32, tea_check_integer(T, 6)) * (1 << 7);
+    checkBufferSizesMatch(T, self, src);
+    checkBufferSizesMatch(T, self, map);
+    if channelX[0] != 'r' and channelX[0] != 'g' and channelX[0] != 'b' and channelX[0] != 'a'
+    {
+        tea_arg_error(T, 4, "bad channel");
+    }
+    if channelY[0] != 'r' and channelY[0] != 'g' and channelY[0] != 'b' and channelY[0] != 'a'
+    {
+        tea_arg_error(T, 5, "bad channel");
+    }
+    for var y : int32 = 0; y < self.buf.h; y++
+    {
+        var d : sr_Pixel* = ptrcast(sr_Pixel*, self.buf.pixels + intcast(isize, y) * intcast(isize, self.buf.w));
+        var m : sr_Pixel* = ptrcast(sr_Pixel*, map.buf.pixels + intcast(isize, y) * intcast(isize, self.buf.w));
+        for var x : int32 = 0; x < self.buf.w; x++
+        {
+            let cx : int32 = ((getChannel(*m, channelX[0]) - (1 << 7)) * scaleX) >> 14;
+            let cy : int32 = ((getChannel(*m, channelY[0]) - (1 << 7)) * scaleY) >> 14;
+            *d = sr_getPixel(src.buf, x + cx, y + cy);
+            d++;
+            m++;
+        }
+    }
+    tea_push_nil(T);
+}
+
+fn fx_blur(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let src : Image* = ptrcast(Image*, tea_check_udata(T, 1, "micro.Image"));
+    let radiusx : int32 = intcast(int32, tea_check_integer(T, 2));
+    let radiusy : int32 = intcast(int32, tea_check_integer(T, 3));
+    let w : int32 = src.buf.w;
+    let h : int32 = src.buf.h;
+    let dx : int32 = 256 / (radiusx * 2 + 1);
+    let dy : int32 = 256 / (radiusy * 2 + 1);
+    let bounds : sr_Rect = sr_rect(radiusx, radiusy, w - radiusx, h - radiusy);
+    var p : sr_Pixel* = self.buf.pixels;
+    checkBufferSizesMatch(T, self, src);
+    for var y : int32 = 0; y < h; y++
+    {
+        let inBoundsY : bool = y >= bounds.y and y < bounds.h;
+        for var x : int32 = 0; x < w; x++
+        {
+            let inBounds : bool = inBoundsY and x >= bounds.x and x < bounds.w;
+            var r : int32 = 0;
+            var g : int32 = 0;
+            var b : int32 = 0;
+            for var ky : int32 = -radiusy; ky <= radiusy; ky++
+            {
+                var r2 : int32 = 0;
+                var g2 : int32 = 0;
+                var b2 : int32 = 0;
+                for var kx : int32 = -radiusx; kx <= radiusx; kx++
+                {
+                    var p2 : sr_Pixel;
+                    if inBounds
+                    {
+                        p2 = src.buf.pixels[(x + kx) + (y + ky) * w];
+                    }
+                    else
+                    {
+                        p2 = sr_getPixel(src.buf, x + kx, y + ky);
+                    }
+                    r2 += intcast(int32, p2.r);
+                    g2 += intcast(int32, p2.g);
+                    b2 += intcast(int32, p2.b);
+                }
+                r += (r2 * dx) >> 8;
+                g += (g2 * dx) >> 8;
+                b += (b2 * dx) >> 8;
+            }
+            p.r = intcast(uint8, (r * dy) >> 8);
+            p.g = intcast(uint8, (g * dy) >> 8);
+            p.b = intcast(uint8, (b * dy) >> 8);
+            p.a = 0xff;
+            p++;
+        }
+    }
+    tea_push_nil(T);
+}
+
+let fxreg : const tea_Reg[] = {
+    {"desaturate", fx_desaturate, 1, 1},
+    {"palette", fx_palette, 2, 0},
+    {"dissolve", fx_dissolve, 2, 1},
+    {"mask", fx_mask, 2, 1},
+    {"wave", fx_wave, 6, 2},
+    {"displace", fx_displace, 7, 0},
+    {"blur", fx_blur, 4, 0},
+    {}
+};
+
+pub fn micro_open_fx(T : tea_State*) : void
+{
+    tea_create_submodule(T, "imagefx", fxreg);
+    initTables();
+}

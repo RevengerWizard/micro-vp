@@ -103,6 +103,18 @@ fn image_fromFile(T : tea_State*) : void
     }
 }
 
+fn image_fromString(T : tea_State*) : void
+{
+    let len : usize;
+    let str : const uint8* = tea_check_lstring(T, 0, &len);
+    let self : Image* = micro_image_new(T);
+    let err : bool = image_load(self, str, intcast(int32, len));
+    if err
+    {
+        tea_error(T, "could not load buffer");
+    }
+}
+
 fn image_fromBlank(T : tea_State*) : void
 {
     let w : int32 = intcast(int32, tea_check_integer(T, 0));
@@ -164,6 +176,47 @@ fn image_getPixel(T : tea_State*) : void
     tea_push_integer(T, intcast(tea_Integer, px.a)); tea_add_item(T, -2);
 }
 
+fn image_copyPixels(T : tea_State*) : void
+{
+    var sub : sr_Rect;
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let src : Image* = ptrcast(Image*, tea_check_udata(T, 1, "micro.Image"));
+    let x : int32 = intcast(int32, tea_opt_integer(T, 2, 0));
+    let y : int32 = intcast(int32, tea_opt_integer(T, 3, 0));
+    var hassub : bool = false;
+    //if !tea_is_nonenil(T, 4)
+    if !(tea_get_type(T, 4) <= TEA_TYPE_NIL)
+    {
+        hassub = true;
+        sub = get_rect(T, 4);
+        check_subrect(T, 4, src.buf, &sub);
+    }
+    let sx : float32 = floatcast(float32, tea_opt_number(T, 5, 1));
+    let sy : float32 = floatcast(float32, tea_opt_number(T, 6, floatcast(tea_Number, sx)));
+    sr_copyPixels(self.buf, src.buf, x, y,
+                    hassub ? &sub : nil, sx, sy);
+}
+
+fn image_noise(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    //let seed : int32 = intcast(int32, tea_opt_number(T, 1, rand()));
+    let seed : uint32 = intcast(uint32, tea_opt_number(T, 1, 0.0));
+    let low : int32 = intcast(int32, tea_opt_number(T, 2, 0.0));
+    let high : int32 = intcast(int32, tea_opt_number(T, 3, 0.0));
+    let grey : bool = tea_opt_bool(T, 4, false);
+    sr_noise(self.buf, seed, low, high, grey);
+}
+
+fn image_floodFill(T : tea_State*) : void
+{
+    let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
+    let x : int32 = intcast(int32, tea_check_integer(T, 1));
+    let y : int32 = intcast(int32, tea_check_integer(T, 2));
+    let px : sr_Pixel = get_color(T, 3);
+    sr_floodFill(self.buf, px, x, y);
+}
+
 fn image_getWidth(T : tea_State*) : void
 {
     let self : Image* = ptrcast(Image*, tea_check_udata(T, 0, "micro.Image"));
@@ -183,16 +236,16 @@ fn image_tostring(T : tea_State*) : void
 
 let ireg : const tea_Methods[] = {
     {"fromFile", "static", image_fromFile, 1, 0},
-    //{"fromString", "static", image_fromString, 1, 0},
+    {"fromString", "static", image_fromString, 1, 0},
     {"fromBlank", "static", image_fromBlank, 2, 0},
     {"clone", "method", image_clone, 1, 0},
     {"reset", "method", image_reset, 1, 0},
     {"clear", "method", image_clear, 1, 4},
     {"setPixel", "method", image_setPixel, 3, 4},
     {"getPixel", "method", image_getPixel, 3, 0},
-    //{"copyPixels", "method", image_copyPixels, 2, 5},
-    //{"noise", "method", image_noise, 1, 4},
-    //{"floodFill", "method", image_floodFill, 3, 4},
+    {"copyPixels", "method", image_copyPixels, 2, 5},
+    {"noise", "method", image_noise, 1, 4},
+    {"floodFill", "method", image_floodFill, 3, 4},
     {"getWidth", "method", image_getWidth, 1, 0},
     {"getHeight", "method", image_getHeight, 1, 0},
     {"tostring", "method", image_tostring, 1, 0},

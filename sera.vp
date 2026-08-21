@@ -447,7 +447,7 @@ fn copyPixelsScaled(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : 
     }
 }
 
-pub fn sr_copyPixels(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, sub : sr_Rect*, sx : float32, sy : float32) : void
+pub fn sr_copyPixels(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, sub : sr_Rect*?, sx : float32, sy : float32) : void
 {
     sx = math::absf32(sx);
     sy = math::absf32(sy);
@@ -478,13 +478,13 @@ pub fn sr_copyPixels(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, sub
     }
 }
 
-pub fn sr_noise(b : sr_Buffer*, seed : uint32, low : int32, high : int32, grey : int32) : void
+pub fn sr_noise(b : sr_Buffer*, seed : uint32, low : int32, high : int32, grey : bool) : void
 {
     var rng : sr_RandState = rand128init(seed);
     low  = clamp(low, 0, 0xfe);
     high = clamp(high, low + 1, 0xff);
     var i : int32 = b.w * b.h;
-    if grey != 0
+    if grey
     {
         while i-- != 0
         {

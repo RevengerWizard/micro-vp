@@ -18,6 +18,7 @@ from m_data import micro_open_Data, micro_open_data
 from m_image import micro_open_Image
 from m_fs import micro_open_fs
 from m_mouse import micro_open_mouse
+from m_system import micro_open_system
 
 pub def WIDTH = 200;
 pub def HEIGHT = 200;
@@ -37,18 +38,23 @@ struct Mods
 }
 let mods : Mods[] = {
     // Objects
+    //{"Source", micro_open_Source},
     {"Data", micro_open_Data},
-    {"Image", micro_open_Image},
+    //{"Gif", micro_open_Gif},
     {"Font", micro_open_Font},
+    {"Image", micro_open_Image},
     // Modules
+    //{"audio", micro_open_audio},
     {"data", micro_open_data},
     {"keyboard", micro_open_keyboard},
     {"mouse", micro_open_mouse},
     {"event", micro_open_event},
+    {"system", micro_open_system},
     {"timer", micro_open_timer},
     {"window", micro_open_window},
-    {"gfx", micro_open_gfx},
     {"fs", micro_open_fs},
+    {"gfx", micro_open_gfx},
+    //{"imagefx", micro_open_imagefx},
     {}
 };
 
@@ -99,17 +105,6 @@ fn micro_open(T : tea_State*) : bool
             return false;
         }
     }
-    /*for var i : uint32 = 1; items[i].name != nil; i++
-    {
-        if tea_load_file(T, items[i].name, nil) != TEA_OK or tea_pcall(T, 0) != TEA_OK
-        {
-            let size : usize;
-            let str : const uint8* = tea_to_lstring(T, -1, &size);
-            io::write(io::stderr, str, size, nil);
-            io::write(io::stderr, "\n", 1, nil);
-            return false;
-        }
-    }*/
     return true;
 }
 

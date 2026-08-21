@@ -1,0 +1,106 @@
+import std::mem as mem
+
+from tea import *
+
+from jo_gif import *
+
+struct Gif
+{
+    state : int32;
+    gif : jo_gif_t;
+    w, h : int32;
+    buf : const uint8*;
+}
+
+def STATE_INIT = 0;
+def STATE_ACTIVE = 1;
+def STATE_CLOSED = 2;
+
+fn gif_free(ud : void*) : void
+{
+    let self = ptrcast(Gif*, ud);
+    mem::free(self.buf);
+    /* Not closed? close now */
+    if self.state == STATE_ACTIVE
+    {
+        jo_gif_end(&self.gif);
+    }
+}
+
+fn gif_new(T : tea_State*) : void
+{
+    let filename : const uint8* = tea_check_string(T, 0);
+    let w : int32 = tea_check_integer(T, 1);
+    let h : int32 = tea_check_integer(T, 2);
+    let ncolors : int32 = tea_opt_integer(T, 3, 63);
+    let self : Gif* = tea_new_udata(T, sizeof(Gif), "micro.Gif");
+    tea_set_finalizer(T, gif_free);
+    memset(self, 0, sizeof(Gif));
+    self.state = STATE_INIT;
+    self.w = w;
+    self.h = h;
+    self.buf = mem::alloc(intcast(usize, w * h * 4));
+    mem::set(self.buf, 0, intcast(usize, w * h * 4));
+    /* Activate gif */
+    self.gif = jo_gif_start(filename, self.w, self.h, 0, ncolors);
+    self.state = STATE_ACTIVE;
+}
+
+fn gif_update(T : tea_State*) : void
+{
+    let self : Gif* = tea_check_udata(T, 0, "micro.Gif");
+    let img : Image* = tea_check_udata(T, 1, "micro.Image");
+    let delay : int32 = tea_check_integer(T, 2);
+    /* Already closed? Error */
+    if self.state == STATE_CLOSED
+    {
+        tea_error(T, "can't update closed gif");
+    }
+    /* Buffer dimensions are okay? */
+    if img.buf.w != self.w or img.buf.h != self.h
+    {
+        //tea_error(T, "bad buffer dimensions for gif object, expected %dx%d", self.w, self.h);
+        tea_error(T, "bad buffer dimensions for gif object, expected");
+    }
+    /* Copy pixels to buffer -- jo_gif expects a specific channel byte-order
+     * which may differ from what sera is using -- alpha channel isn't copied
+     * since jo_gif doesn't use this */
+    var i : int32;
+    var n : int32;
+    let len : int32 = self.w * self.h;
+    let p : sr_Pixel* = img.buf.pixels;
+    for i = 0; i < len; i++
+    {
+        n = i * 4;
+        self.buf[n] = p[i].rgba.r;
+        self.buf[n + 1] = p[i].rgba.g;
+        self.buf[n + 2] = p[i].rgba.b;
+    }
+    /* Update */
+    jo_gif_frame(&self.gif, self.buf, delay, 0);
+}
+
+fn gif_close(T : tea_State*) : void
+{
+    let self : Gif* = tea_check_udata(T, 0, "micro.Gif");
+    if self.state == STATE_CLOSED
+    {
+        tea_error(T, "state already closed");
+    }
+    self.state = STATE_CLOSED;
+    jo_gif_end(&self.gif);
+}
+
+let reg : const tea_Methods[] = {
+    {"new", "static", gif_new, 3, 1},
+    {"update", "method", gif_update, 3, 0},
+    {"close", "method", gif_close, 0, 0},
+    {}
+};
+
+pub fn micro_open_Gif(T : tea_State*) : void
+{
+    tea_create_class(T, "Gif", greg);
+    tea_push_value(T, -1);
+    tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Gif");
+}

@@ -1,0 +1,96 @@
+import std::str as str
+
+from glfw3 import *
+
+from tea import *
+
+from spxe import *
+
+/*fn dirname(str : uint8*) : uint8*
+{
+    var p : uint8* = str + str::len(str);
+    while p != str
+    {
+        if *p == '/' or *p == '\\'
+        {
+            *p = '\0';
+            break;
+        }
+        p--;
+    }
+    return str;
+}*/
+
+let opts : const uint8*?[] = {"exedir", "appdata", nil};
+
+fn system_info(T : tea_State*) : void
+{
+    let id : int32 = tea_check_option(T, 0, nil, opts);
+    switch id
+    case 0
+    {
+        tea_push_string(T, "todo");
+//#if _WIN32
+        /*char buf[1024];
+        int len = GetModuleFileName(NULL, buf, sizeof(buf) - 1);
+        buf[len] = '\0';
+        dirname(buf);
+        tea_push_string(T, buf);*/
+/*#elif __linux__
+        char path[128];
+        char buf[1024];
+        sprintf(path, "/proc/%d/exe", getpid());
+        int len = readlink(path, buf, sizeof(buf) - 1);
+        buf[len] = '\0';
+        dirname(buf);
+        tea_push_string(T, buf);
+#elif __FreeBSD__
+        /* TODO : Implement this */
+        tea_push_string(T, ".");
+#elif __APPLE__
+        char buf[1024];
+        uint32_t size = sizeof(buf);
+        dirname(buf);
+        tea_push_string(T, buf);
+#else
+        tea_push_string(T, ".");
+#endif*/
+    }
+    case 1
+    {
+//#if _WIN32
+        tea_push_string(T, "todo1");
+        //tea_push_string(T, getenv("APPDATA"));
+/*#elif __APPLE__
+        tea_push_fstring(T, "%s/Library/Application Support", getenv("HOME"));
+#else
+        tea_push_fstring(T, "%s/.local/share", getenv("HOME"));
+#endif*/
+    }
+}
+
+fn system_getClipboard(T : tea_State*) : void
+{
+    let window : GLFWwindow* = spxeGetWindow();
+    let text : const uint8* = glfwGetClipboardString(window);
+    tea_push_string(T, text);
+}
+
+fn system_setClipboard(T : tea_State*) : void
+{
+    let window : GLFWwindow* = spxeGetWindow();
+    let text : const uint8* = tea_check_string(T, 0);
+    glfwSetClipboardString(window, text);
+}
+
+let sreg : const tea_Reg[] = {
+    {"info", system_info, 1, 0},
+    {"getClipboard", system_getClipboard, 0, 0},
+    {"setClipboard", system_setClipboard, 1, 0},
+    {}
+};
+
+pub fn micro_open_system(T : tea_State*) : void
+{
+    tea_create_submodule(T, "system", sreg);
+}
