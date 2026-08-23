@@ -31,8 +31,7 @@ fn iceil(x : float32) : int32
 
 pub fn ttf_new(data : const void*, len : int32) : ttf_Font*?
 {
-    //let self : ttf_Font*? = mem::calloc(1, sizeof(ttf_Font));
-    let self : ttf_Font*? = mem::alloc(sizeof(ttf_Font));
+    let self : ttf_Font*? = mem::calloc(1, sizeof(ttf_Font));
     mem::set(self, 0, sizeof(ttf_Font));
     if self == nil return nil;
     // Copy font data
@@ -182,17 +181,6 @@ pub fn ttf_render(self : ttf_Font*, str : const uint8*, w : int32*, h : int32*) 
         var y0 : int32;
         var x1 : int32;
         var y1 : int32;
-        if intcast(int32, c)  > 0xffff
-        {
-            io::write(io::stdout, "wat ", 4, nil);
-            let buf : uint8[20];
-
-            var s : usize = conv::i32tos(buf, 20, intcast(int32, c));
-            io::write(io::stdout, buf, s, nil);
-            io::putc('\n');
-            //io::putc(intcast(uint8, c));
-            //io::putc('\n');
-        }
         stbtt_GetCodepointBitmapBoxSubpixel(
             &self.font, intcast(int32, c), self.scale, self.scale, xfract, 0.0,
             &x0, &y0, &x1, &y1);

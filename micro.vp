@@ -19,6 +19,8 @@ from m_image import micro_open_Image
 from m_fs import micro_open_fs
 from m_mouse import micro_open_mouse
 from m_system import micro_open_system
+from m_source import micro_open_Source
+from m_audio import micro_open_audio
 
 pub def WIDTH = 200;
 pub def HEIGHT = 200;
@@ -38,13 +40,13 @@ struct Mods
 }
 let mods : Mods[] = {
     // Objects
-    //{"Source", micro_open_Source},
+    {"Source", micro_open_Source},
     {"Data", micro_open_Data},
     //{"Gif", micro_open_Gif},
     {"Font", micro_open_Font},
     {"Image", micro_open_Image},
     // Modules
-    //{"audio", micro_open_audio},
+    {"audio", micro_open_audio},
     {"data", micro_open_data},
     {"keyboard", micro_open_keyboard},
     {"mouse", micro_open_mouse},

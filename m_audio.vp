@@ -1,7 +1,7 @@
 from tea import *
 
-let inited : bool = false;
-let samplerate : float64 = 0;
+var inited : bool = false;
+var samplerate : float64 = 0;
 
 /*fn audio_callback(pDevice : ma_device*, pOutput : void*, pInput : const void*, frameCount : ma_uint32) : void
 {
@@ -59,12 +59,12 @@ fn audio_init(T : tea_State*) : void
     }*/
 }
 
-let areg : tea_Reg = {
+let areg : tea_Reg[] = {
     {"init", audio_init, 0, 2},
     {}
-}
+};
 
 pub fn micro_open_audio(T : tea_State*) : void
 {
-    tea_create_submodule(T, "audio", areg)
+    tea_create_submodule(T, "audio", areg);
 }

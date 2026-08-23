@@ -1,0 +1,55 @@
+from tea import *
+
+pub def FREELIST_REF = 0;
+
+// pre-defined references
+pub def TEA_NOREF = -2;
+pub def TEA_REFNIL = -1;
+
+pub fn teax_ref(T : tea_State*, t : int32) : int32
+{
+    var ref : int32;
+    //t = tea_absindex(T, t);
+    //if tea_is_nil(T, -1)
+    if tea_get_type(T, -1) == TEA_TYPE_NIL
+    {
+        tea_pop(T, 1);     /* remove from stack */
+        return TEA_REFNIL; /* `nil' has a unique fixed reference */
+    }
+    tea_push_integer(T, FREELIST_REF);
+    if !tea_get_field(T, t) { tea_pop(T, 1); tea_push_nil(T); }    /* get first free element */
+    ref = intcast(int32, tea_to_integer(T, -1)); /* ref = t[FREELIST_REF] */
+    tea_pop(T, 1);                   /* remove it from stack */
+    if ref != 0    /* any free element? */
+    {
+        tea_push_integer(T, FREELIST_REF);
+        tea_push_integer(T, ref);
+        if !tea_get_field(T, t) { tea_pop(T, 1); tea_push_nil(T); }          /* remove it from list */
+        tea_set_field(T, t); /* (t[FREELIST_REF] = t[ref]) */
+    }
+    else
+    { /* no free elements */
+        ref = intcast(int32, tea_len(T, t));
+        ref++; /* create new reference */
+    }
+    tea_push_integer(T, ref);
+    tea_insert(T, -2);
+    tea_set_field(T, t);
+    return ref;
+}
+
+pub fn teax_unref(T : tea_State*, t : int32, ref : int32) : void
+{
+    if ref >= 0
+    {
+        //t = tea_absindex(T, t);
+        tea_push_integer(T, ref);
+        tea_push_integer(T, FREELIST_REF);
+        if !tea_get_field(T, t) { tea_pop(T, 1); tea_push_nil(T); }
+        tea_set_field(T, t); /* t[ref] = t[FREELIST_REF] */
+
+        tea_push_integer(T, FREELIST_REF);
+        tea_push_integer(T, ref);
+        tea_set_field(T, t); /* t[FREELIST_REF] = ref */
+    }
+}

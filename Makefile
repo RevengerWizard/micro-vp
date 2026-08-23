@@ -14,6 +14,9 @@ SRCS = 	micro.vp \
 		m_fs.vp \
 		m_mouse.vp \
 		m_system.vp \
+		m_source.vp \
+		m_audio.vp \
+		teax.vp \
        	spxe.vp \
         gleq.vp \
         stb_image.vp \
