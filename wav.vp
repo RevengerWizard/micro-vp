@@ -1,26 +1,102 @@
-struct Wav
+// Port of rxi's wav library
+
+import std::mem as mem
+import std::str as str
+
+pub struct wav_t
 {
     data : const void*;
     bitdepth : int32;
     samplerate : int32;
     channels : int32;
-    len : usize;
+    length : usize;
 }
 
-pub def WAV_ESUCCESS = 0;
-pub def WAV_EFAILURE = -1;
-pub def WAV_EBADHEADER = -2;
-pub def WAV_EBADFMT = -3;
-pub def WAV_ENOFMT = -4;
-pub def WAV_ENODATA = -5;
-pub def WAV_ENOSUPPORT = -6;
+pub def WAV_ESUCCESS : int32 =  0;
+pub def WAV_EFAILURE : int32 = -1;
+pub def WAV_EBADHEADER : int32 = -2;
+pub def WAV_EBADFMT : int32 = -3;
+pub def WAV_ENOFMT : int32 = -4;
+pub def WAV_ENODATA : int32 = -5;
+pub def WAV_ENOSUPPORT : int32 = -6;
 
-pub fn wav_read(w : Wav*, data : const void*, len : usize) : int32
+fn readU16(p : const uint8*) : uint16
 {
-
+    return intcast(uint16, intcast(uint32, p[0]) | (intcast(uint32, p[1]) << 8));
 }
 
-pub fn wav_strerr(err : int32) : const uint8*
+fn readU32(p : const uint8*) : uint32
+{
+    return intcast(uint32, p[0]) |
+           intcast(uint32, p[1]) << 8 |
+           intcast(uint32, p[2]) << 16 |
+           intcast(uint32, p[3]) << 24;
+}
+
+// bug...
+fn strlen(s : const uint8*) : usize
+{
+    return str::len(s);
+}
+
+// Returns pointer to subchunk payload, or nil. Writes chunk size to *size.
+fn findSubChunk(data : const uint8*, len : usize, id : const uint8*, size : usize*) : const uint8*?
+{
+    var idLen : usize = strlen(id);
+    var p : const uint8* = data + 12;
+    while p < data + len
+    {
+        *size = intcast(usize, readU32(p + 4));
+        if mem::cmp(ptrcast(const void*, p), ptrcast(const void*, id), idLen) == 0iz
+        {
+            //return p + 8;
+            return ptrcast(const uint8*?, p + 8);
+        }
+        p = p + *size + 8;
+    }
+    return nil;
+}
+
+pub fn wav_read(w : wav_t*, data : const void*, len : usize) : int32
+{
+    var p  : const uint8* = ptrcast(const uint8*, data);
+    var sz : usize;
+
+    mem::set(ptrcast(void*, w), 0, sizeof(wav_t));
+
+    // Check RIFF/WAVE header
+    if mem::cmp(ptrcast(const void*, p), ptrcast(const void*, "RIFF"), 4) != 0 or
+       mem::cmp(ptrcast(const void*, p + 8), ptrcast(const void*, "WAVE"), 4) != 0
+    {
+        return WAV_EBADHEADER;
+    }
+
+    // Find fmt subchunk
+    var fmt : const uint8*? = findSubChunk(p, len, "fmt ", &sz);
+    if fmt == nil return WAV_ENOFMT;
+
+    var format : int32 = intcast(int32, readU16(fmt));
+    var channels : int32 = intcast(int32, readU16(fmt + 2));
+    var samplerate : int32 = intcast(int32, readU32(fmt + 4));
+    var bitdepth : int32 = intcast(int32, readU16(fmt + 14));
+
+    if format != 1 return WAV_ENOSUPPORT;
+    if channels == 0 or samplerate == 0 or bitdepth == 0 return WAV_EBADFMT;
+
+    // Find data subchunk
+    var chunk : const uint8*? = findSubChunk(p, len, "data", &sz);
+    if chunk == nil return WAV_ENODATA;
+
+    w.data = ptrcast(const void*, chunk);
+    w.samplerate = samplerate;
+    w.channels = channels;
+    w.bitdepth = bitdepth;
+    w.length = (sz / intcast(usize, bitdepth / 8)) / intcast(usize, channels);
+
+    return WAV_ESUCCESS;
+}
+
+pub fn wav_strerror(err : int32) : const uint8*
 {
     switch err
     case WAV_ESUCCESS return "success";
@@ -29,7 +105,6 @@ pub fn wav_strerr(err : int32) : const uint8*
     case WAV_EBADFMT return "bad fmt data";
     case WAV_ENOFMT return "missing 'fmt' subchunk";
     case WAV_ENODATA return "missing 'data' subchunk";
-    case WAV_ENOSUPPORT return  "unsupported format; "
-                                "expected uncompressed PCM";
+    case WAV_ENOSUPPORT return "unsupported format; expected uncompressed PCM";
     default return "unknown error";
 }
