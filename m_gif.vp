@@ -1,8 +1,11 @@
 import std::mem as mem
+import std::io as io
 
 from tea import *
 
 from jo_gif import *
+from m_image import Image
+from sera import *
 
 struct Gif
 {
@@ -30,19 +33,19 @@ fn gif_free(ud : void*) : void
 fn gif_new(T : tea_State*) : void
 {
     let filename : const uint8* = tea_check_string(T, 0);
-    let w : int32 = tea_check_integer(T, 1);
-    let h : int32 = tea_check_integer(T, 2);
-    let ncolors : int32 = tea_opt_integer(T, 3, 63);
+    let w : int32 = intcast(int32, tea_check_integer(T, 1));
+    let h : int32 = intcast(int32, tea_check_integer(T, 2));
+    let ncolors : int32 = intcast(int32, tea_opt_integer(T, 3, 63));
     let self : Gif* = tea_new_udata(T, sizeof(Gif), "micro.Gif");
     tea_set_finalizer(T, gif_free);
-    memset(self, 0, sizeof(Gif));
+    mem::set(self, 0, sizeof(Gif));
     self.state = STATE_INIT;
     self.w = w;
     self.h = h;
     self.buf = mem::alloc(intcast(usize, w * h * 4));
     mem::set(self.buf, 0, intcast(usize, w * h * 4));
     /* Activate gif */
-    self.gif = jo_gif_start(filename, self.w, self.h, 0, ncolors);
+    self.gif = jo_gif_start(filename, intcast(int16, self.w), intcast(int16, self.h), 0, ncolors);
     self.state = STATE_ACTIVE;
 }
 
@@ -50,7 +53,7 @@ fn gif_update(T : tea_State*) : void
 {
     let self : Gif* = tea_check_udata(T, 0, "micro.Gif");
     let img : Image* = tea_check_udata(T, 1, "micro.Image");
-    let delay : int32 = tea_check_integer(T, 2);
+    let delay : int32 = intcast(int32, tea_check_integer(T, 2));
     /* Already closed? Error */
     if self.state == STATE_CLOSED
     {
@@ -72,12 +75,12 @@ fn gif_update(T : tea_State*) : void
     for i = 0; i < len; i++
     {
         n = i * 4;
-        self.buf[n] = p[i].rgba.r;
-        self.buf[n + 1] = p[i].rgba.g;
-        self.buf[n + 2] = p[i].rgba.b;
+        self.buf[n] = p[i].r;
+        self.buf[n + 1] = p[i].g;
+        self.buf[n + 2] = p[i].b;
     }
     /* Update */
-    jo_gif_frame(&self.gif, self.buf, delay, 0);
+    jo_gif_frame(&self.gif, self.buf, intcast(int16, delay), false);
 }
 
 fn gif_close(T : tea_State*) : void
@@ -91,7 +94,7 @@ fn gif_close(T : tea_State*) : void
     jo_gif_end(&self.gif);
 }
 
-let reg : const tea_Methods[] = {
+let greg : const tea_Methods[] = {
     {"new", "static", gif_new, 3, 1},
     {"update", "method", gif_update, 3, 0},
     {"close", "method", gif_close, 0, 0},

@@ -1,0 +1,493 @@
+/* Public domain, Simple, Minimalistic GIF writer - http://jonolick.com
+ * Translated from jo_gif.c by Jon Olick
+ *
+ * Quick Notes:
+ * 	Supports only 4 component input, alpha is currently ignored. (RGBX)
+ *
+ * Latest revisions:
+ * 	1.00 (2015-11-03) initial release
+ *
+ * Basic usage:
+ *	char *frame = new char[128*128*4]; // 4 component. RGBX format, where X is unused
+ *	jo_gif_t gif = jo_gif_start("foo.gif", 128, 128, 0, 32);
+ *	jo_gif_frame(&gif, frame, 4, false); // frame 1
+ *	jo_gif_frame(&gif, frame, 4, false); // frame 2
+ *	jo_gif_frame(&gif, frame, 4, false); // frame 3, ...
+ *	jo_gif_end(&gif);
+ * */
+
+import std::io as io
+from std::io import OpenMode
+import std::mem as mem
+import std::math as math
+
+pub struct jo_gif_t
+{
+    fp : io::FILE*?;
+    palette : uint8[0x300];
+    width : int16;
+    height : int16;
+    repeat : int16;
+    numColors : int32;
+    palSize : int32;
+    frame : int32;
+}
+
+// ─── quantize ────────────────────────────────────────────────────────────────
+
+def INTBIASSHIFT : int32 = 16;
+def INTBIAS : int32 = 1 << INTBIASSHIFT;
+def GAMMASHIFT : int32 = 10;
+def BETASHIFT : int32 = 10;
+def BETA : int32 = INTBIAS >> BETASHIFT;
+def BETAGAMMA : int32 = INTBIAS << (GAMMASHIFT - BETASHIFT);
+
+def RADIUSBIASSHIFT : int32 = 6;
+def RADIUSBIAS : int32 = 1 << RADIUSBIASSHIFT;
+def RADIUSDEC : int32 = 30;
+
+def ALPHABIASSHIFT : int32 = 10;
+def INITALPHA : int32 = 1 << ALPHABIASSHIFT;
+
+def RADBIASSHIFT : int32 = 8;
+def RADBIAS : int32 = 1 << RADBIASSHIFT;
+def ALPHARADBSHIFT : int32 = ALPHABIASSHIFT + RADBIASSHIFT;
+def ALPHARADBIAS : int32 = 1 << ALPHARADBSHIFT;
+
+def PRIMES_COUNT : int32 = 4;
+
+fn jo_gif_quantize(rgba : uint8*, rgbaSize : int32, sample : int32, map : uint8*, numColors : int32) : void
+{
+    sample = sample < 1 ? 1 : (sample > 30 ? 30 : sample);
+
+    var network : int32[256][3];
+    var bias : int32[256];
+    var freq : int32[256];
+
+    mem::set(ptrcast(void*, bias), 0, sizeof(typeof(bias)));
+
+    for var i : int32 = 0; i < numColors; i++
+    {
+        network[i][0] = (i << 12) / numColors;
+        network[i][1] = (i << 12) / numColors;
+        network[i][2] = (i << 12) / numColors;
+        freq[i] = INTBIAS / numColors;
+    }
+
+    // Learn
+    {
+        var primes : int32[4] = {499, 491, 487, 503};
+        var step : int32 = 4;
+        for var i : int32 = 0; i < PRIMES_COUNT; i++
+        {
+            if rgbaSize > primes[i] * 4 and (rgbaSize % primes[i]) != 0
+            {
+                step = primes[i] * 4;
+            }
+        }
+        if step == 4 { sample = 1; }
+
+        var alphadec : int32 = 30 + ((sample - 1) / 3);
+        var samplepixels: int32 = rgbaSize / (4 * sample);
+        var delta : int32 = samplepixels / 100;
+        var alpha : int32 = INITALPHA;
+        if delta == 0 { delta = 1; }
+
+        var radius : int32 = (numColors >> 3) * RADIUSBIAS;
+        var rad : int32 = radius >> RADIUSBIASSHIFT;
+        if rad <= 1 { rad = 0; }
+        var radSq  : int32 = rad * rad;
+        var radpower : int32[32];
+
+        for var i : int32 = 0; i < rad; i++
+        {
+            radpower[i] = alpha * (((radSq - i * i) * RADBIAS) / radSq);
+        }
+
+        var i : int32 = 0;
+        var pix : int32 = 0;
+        while i < samplepixels
+        {
+            var r : int32 = intcast(int32, rgba[pix + 0]) << 4;
+            var g : int32 = intcast(int32, rgba[pix + 1]) << 4;
+            var b : int32 = intcast(int32, rgba[pix + 2]) << 4;
+
+            var bestd : int32 = 0x7FFFFFFF;
+            var bestbiasd: int32 = 0x7FFFFFFF;
+            var bestpos : int32 = -1;
+            var j : int32 = -1;
+
+            for var k : int32 = 0; k < numColors; k++
+            {
+                var dist : int32 = math::absi32(network[k][0] - r)
+                                 + math::absi32(network[k][1] - g)
+                                 + math::absi32(network[k][2] - b);
+                if dist < bestd
+                {
+                    bestd   = dist;
+                    bestpos = k;
+                }
+                var biasdist : int32 = dist - (bias[k] >> (INTBIASSHIFT - 4));
+                if biasdist < bestbiasd
+                {
+                    bestbiasd = biasdist;
+                    j = k;
+                }
+                var betafreq : int32 = freq[k] >> BETASHIFT;
+                freq[k] -= betafreq;
+                bias[k] += betafreq << GAMMASHIFT;
+            }
+            freq[bestpos] += BETA;
+            bias[bestpos] -= BETAGAMMA;
+
+            network[j][0] -= (network[j][0] - r) * alpha / INITALPHA;
+            network[j][1] -= (network[j][1] - g) * alpha / INITALPHA;
+            network[j][2] -= (network[j][2] - b) * alpha / INITALPHA;
+
+            if rad != 0
+            {
+                var lo : int32 = j - rad;
+                if lo < -1 { lo = -1; }
+                var hi : int32 = j + rad;
+                if hi > numColors { hi = numColors; }
+
+                var jj : int32 = j + 1;
+                var m  : int32 = 1;
+                while jj < hi
+                {
+                    var a : int32 = radpower[m];
+                    m++;
+                    network[jj][0] -= (network[jj][0] - r) * a / ALPHARADBIAS;
+                    network[jj][1] -= (network[jj][1] - g) * a / ALPHARADBIAS;
+                    network[jj][2] -= (network[jj][2] - b) * a / ALPHARADBIAS;
+                    jj++;
+                }
+
+                var kk : int32 = j - 1;
+                m = 1;
+                while kk > lo
+                {
+                    var a : int32 = radpower[m];
+                    m++;
+                    network[kk][0] -= (network[kk][0] - r) * a / ALPHARADBIAS;
+                    network[kk][1] -= (network[kk][1] - g) * a / ALPHARADBIAS;
+                    network[kk][2] -= (network[kk][2] - b) * a / ALPHARADBIAS;
+                    kk--;
+                }
+            }
+
+            pix += step;
+            if pix >= rgbaSize { pix -= rgbaSize; }
+
+            i++;
+            if i % delta == 0
+            {
+                alpha -= alpha / alphadec;
+                radius -= radius / RADIUSDEC;
+                rad = radius >> RADIUSBIASSHIFT;
+                if rad <= 1 { rad = 0; }
+                radSq = rad * rad;
+                for var jj : int32 = 0; jj < rad; jj++
+                {
+                    radpower[jj] = alpha * ((radSq - jj * jj) * RADBIAS / radSq);
+                }
+            }
+        }
+    }
+
+    for var i : int32 = 0; i < numColors; i++
+    {
+        network[i][0] >>= 4;
+        network[i][1] >>= 4;
+        network[i][2] >>= 4;
+        map[i * 3 + 0] = intcast(uint8, network[i][0]);
+        map[i * 3 + 1] = intcast(uint8, network[i][1]);
+        map[i * 3 + 2] = intcast(uint8, network[i][2]);
+    }
+}
+
+// ─── LZW ─────────────────────────────────────────────────────────────────────
+
+struct jo_gif_lzw_t
+{
+    fp : io::FILE*?;
+    numBits : int32;
+    buf : uint8[256];
+    idx : uint8;
+    outBits : int32;
+    curBits : int32;
+}
+
+fn jo_gif_lzw_write(s : jo_gif_lzw_t*, code : int32) : void
+{
+    s.outBits |= code << s.curBits;
+    s.curBits += s.numBits;
+    while s.curBits >= 8
+    {
+        s.buf[intcast(usize, s.idx)] = intcast(uint8, s.outBits & 255);
+        s.idx++;
+        s.outBits >>= 8;
+        s.curBits  -= 8;
+        if intcast(int32, s.idx) >= 255
+        {
+            io::putc(s.fp, s.idx);
+            io::write(s.fp, ptrcast(const uint8*, s.buf), intcast(usize, s.idx), nil);
+            s.idx = 0;
+        }
+    }
+}
+
+def HASH_SIZE : int32 = 5003;
+
+fn jo_gif_lzw_encode(inp : uint8*, len : int32, fp : io::FILE*?) : void
+{
+    var state : jo_gif_lzw_t;
+    mem::set(ptrcast(void*, &state), 0, sizeof(jo_gif_lzw_t));
+    state.fp = fp;
+    state.numBits = 9;
+    var maxcode : int32 = 511;
+
+    var codetab : int16[5003];
+    var hashTbl : int32[5003];
+    mem::set(ptrcast(void*, hashTbl), 0xFF, sizeof(typeof(hashTbl)));
+
+    jo_gif_lzw_write(&state, 0x100);
+
+    var free_ent : int32 = 0x102;
+    var pos : int32 = 0;
+    var ent : int32 = intcast(int32, inp[pos]);
+    pos++;
+    len--;
+
+    while len > 0
+    {
+        var c : int32 = intcast(int32, inp[pos]);
+        pos++;
+        len--;
+
+        var fcode : int32 = (c << 12) + ent;
+        var key : int32 = (c << 4) ^ ent;
+
+        // Probe hash table
+        var found : bool = false;
+        while hashTbl[key] >= 0
+        {
+            if hashTbl[key] == fcode
+            {
+                ent = intcast(int32, codetab[key]);
+                found = true;
+                break;
+            }
+            key++;
+            if key >= HASH_SIZE { key -= HASH_SIZE; }
+        }
+        if found continue;
+
+        jo_gif_lzw_write(&state, ent);
+        ent = c;
+
+        if free_ent < 4096
+        {
+            if free_ent > maxcode
+            {
+                state.numBits++;
+                if state.numBits == 12
+                {
+                    maxcode = 4096;
+                }
+                else
+                {
+                    maxcode = (1 << state.numBits) - 1;
+                }
+            }
+            codetab[key] = intcast(int16, free_ent);
+            free_ent++;
+            hashTbl[key] = fcode;
+        }
+        else
+        {
+            mem::set(ptrcast(void*, hashTbl), 0xFF, sizeof(typeof(hashTbl)));
+            free_ent = 0x102;
+            jo_gif_lzw_write(&state, 0x100);
+            state.numBits = 9;
+            maxcode = 511;
+        }
+    }
+
+    jo_gif_lzw_write(&state, ent);
+    jo_gif_lzw_write(&state, 0x101);
+    jo_gif_lzw_write(&state, 0);
+    if intcast(int32, state.idx) > 0
+    {
+        io::putc(fp, state.idx);
+        io::write(fp, ptrcast(const uint8*, state.buf), intcast(usize, state.idx), nil);
+    }
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+inline fn gif_clamp(a : int32, b : int32, c : int32) : int32
+{
+    return a < b ? b : (a > c ? c : a);
+}
+
+fn write_u16(fp : io::FILE*?, v : int16) : void
+{
+    io::write(fp, ptrcast(const uint8*, &v), 2, nil);
+}
+
+// ─── public API ──────────────────────────────────────────────────────────────
+
+pub fn jo_gif_start(filename : const uint8*, width : int16, height : int16, repeat : int16, numColors : int32) : jo_gif_t
+{
+    numColors = numColors > 255 ? 255 : (numColors < 2 ? 2 : numColors);
+
+    var gif : jo_gif_t;
+    mem::set(ptrcast(void*, &gif), 0, sizeof(jo_gif_t));
+    gif.width = width;
+    gif.height = height;
+    gif.repeat = repeat;
+    gif.numColors = numColors;
+    //gif.palSize = intcast(int32, math::log2f64(floatcast(float64, numColors)));
+    var nc : int32 = numColors;
+    while nc > 1 { nc >>= 1; gif.palSize++; }
+    gif.palSize--;
+
+    gif.fp = io::open(filename, OpenMode::WRITE | OpenMode::CREATE | OpenMode::TRUNC | OpenMode::BINARY, nil);
+    if gif.fp == nil
+    {
+        return gif;
+    }
+
+    io::write(gif.fp, "GIF89a", 6, nil);
+    write_u16(gif.fp, gif.width);
+    write_u16(gif.fp, gif.height);
+
+    var flags : uint8 = intcast(uint8, 0xF0 | gif.palSize);
+    io::write(gif.fp, ptrcast(const uint8*, &flags), 1, nil);
+    io::write(gif.fp, "\x00\x00", 2, nil);
+
+    return gif;
+}
+
+pub fn jo_gif_frame(gif : jo_gif_t*, rgba : uint8*, delayCsec : int16, localPalette : bool) : void
+{
+    if gif.fp == nil { return; }
+
+    var width : int32 = intcast(int32, gif.width);
+    var height : int32 = intcast(int32, gif.height);
+    var size : int32 = width * height;
+
+    var localPalTbl : uint8[0x300];
+    var palette : uint8* = (gif.frame == 0 or !localPalette)
+        ? ptrcast(uint8*, gif.palette)
+        : ptrcast(uint8*, localPalTbl);
+
+    if gif.frame == 0 or localPalette
+    {
+        jo_gif_quantize(rgba, size * 4, 1, palette, gif.numColors);
+    }
+
+    var indexedPixels : uint8* = mem::alloc(intcast(usize, size));
+    {
+        var ditheredPixels : uint8* = mem::alloc(intcast(usize, size * 4));
+        mem::copy(ditheredPixels, rgba, intcast(usize, size * 4));
+
+        for var k : int32 = 0; k < size * 4; k += 4
+        {
+            var rgb0 : int32 = intcast(int32, ditheredPixels[k + 0]);
+            var rgb1 : int32 = intcast(int32, ditheredPixels[k + 1]);
+            var rgb2 : int32 = intcast(int32, ditheredPixels[k + 2]);
+
+            var bestd : int32 = 0x7FFFFFFF;
+            var best : int32 = -1;
+            for var i : int32 = 0; i < gif.numColors; i++
+            {
+                var bb : int32 = intcast(int32, palette[i * 3 + 0]) - rgb0;
+                var gg : int32 = intcast(int32, palette[i * 3 + 1]) - rgb1;
+                var rr : int32 = intcast(int32, palette[i * 3 + 2]) - rgb2;
+                var d : int32 = bb * bb + gg * gg + rr * rr;
+                if d < bestd
+                {
+                    bestd = d;
+                    best  = i;
+                }
+            }
+            indexedPixels[k / 4] = intcast(uint8, best);
+
+            var idx : int32 = intcast(int32, indexedPixels[k / 4]);
+            var diff0 : int32 = intcast(int32, ditheredPixels[k + 0]) - intcast(int32, palette[idx * 3 + 0]);
+            var diff1 : int32 = intcast(int32, ditheredPixels[k + 1]) - intcast(int32, palette[idx * 3 + 1]);
+            var diff2 : int32 = intcast(int32, ditheredPixels[k + 2]) - intcast(int32, palette[idx * 3 + 2]);
+
+            // Floyd-Steinberg error diffusion
+            if k + 4 < size * 4
+            {
+                ditheredPixels[k + 4 + 0] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + 4 + 0]) + diff0 * 7 / 16, 0, 255));
+                ditheredPixels[k + 4 + 1] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + 4 + 1]) + diff1 * 7 / 16, 0, 255));
+                ditheredPixels[k + 4 + 2] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + 4 + 2]) + diff2 * 7 / 16, 0, 255));
+            }
+            if k + width * 4 + 4 < size * 4
+            {
+                ditheredPixels[k - 4 + width * 4 + 0] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k - 4 + width * 4 + 0]) + diff0 * 3 / 16, 0, 255));
+                ditheredPixels[k - 4 + width * 4 + 1] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k - 4 + width * 4 + 1]) + diff1 * 3 / 16, 0, 255));
+                ditheredPixels[k - 4 + width * 4 + 2] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k - 4 + width * 4 + 2]) + diff2 * 3 / 16, 0, 255));
+                ditheredPixels[k + width * 4 + 0] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + width * 4 + 0]) + diff0 * 5 / 16, 0, 255));
+                ditheredPixels[k + width * 4 + 1] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + width * 4 + 1]) + diff1 * 5 / 16, 0, 255));
+                ditheredPixels[k + width * 4 + 2] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + width * 4 + 2]) + diff2 * 5 / 16, 0, 255));
+                ditheredPixels[k + width * 4 + 4 + 0] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + width * 4 + 4 + 0]) + diff0 * 1 / 16, 0, 255));
+                ditheredPixels[k + width * 4 + 4 + 1] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + width * 4 + 4 + 1]) + diff1 * 1 / 16, 0, 255));
+                ditheredPixels[k + width * 4 + 4 + 2] = intcast(uint8, gif_clamp(intcast(int32, ditheredPixels[k + width * 4 + 4 + 2]) + diff2 * 1 / 16, 0, 255));
+            }
+        }
+        mem::free(ditheredPixels);
+    }
+
+    if gif.frame == 0
+    {
+        // Global Color Table
+        io::write(gif.fp, ptrcast(const uint8*, palette), intcast(usize, 3 * (1 << (gif.palSize + 1))), nil);
+
+        if intcast(int32, gif.repeat) >= 0
+        {
+            // Netscape Extension
+            io::write(gif.fp, "\x21\xff\x0bNETSCAPE2.0\x03\x01", 16, nil);
+            write_u16(gif.fp, gif.repeat);
+            io::putc(gif.fp, 0u8);
+        }
+    }
+
+    // Graphic Control Extension
+    io::write(gif.fp, "\x21\xf9\x04\x00", 4, nil);
+    write_u16(gif.fp, delayCsec);
+    io::write(gif.fp, "\x00\x00", 2, nil);
+
+    // Image Descriptor
+    io::write(gif.fp, "\x2c\x00\x00\x00\x00", 5, nil);
+    write_u16(gif.fp, gif.width);
+    write_u16(gif.fp, gif.height);
+
+    if gif.frame == 0 or !localPalette
+    {
+        io::putc(gif.fp, 0u8);
+    }
+    else
+    {
+        io::putc(gif.fp, intcast(uint8, 0x80 | gif.palSize));
+        io::write(gif.fp, ptrcast(const uint8*, palette), intcast(usize, 3 * (1 << (gif.palSize + 1))), nil);
+    }
+
+    io::putc(gif.fp, 8);
+    jo_gif_lzw_encode(indexedPixels, size, gif.fp);
+    io::putc(gif.fp, 0);
+
+    gif.frame++;
+    mem::free(indexedPixels);
+}
+
+pub fn jo_gif_end(gif : jo_gif_t*) : void
+{
+    if gif.fp == nil { return; }
+    io::putc(gif.fp, 0x3b);
+    io::close(gif.fp, nil);
+}
