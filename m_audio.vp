@@ -1,7 +1,7 @@
 from tea import *
 
-var inited : bool = false;
-var samplerate : float64 = 0;
+var ainited : bool = false;
+var samplerate : float64;
 
 /*fn audio_callback(pDevice : ma_device*, pOutput : void*, pInput : const void*, frameCount : ma_uint32) : void
 {
@@ -11,11 +11,11 @@ var samplerate : float64 = 0;
     var i : int32;
     //UNUSED(T);
 
-    /* Process source commands */
+    // Process source commands
     source_processCommands();
-    /* Process sources audio */
+    // Process sources audio
     source_processAllSources(len);
-    /* Copy master to buffer */
+    // Copy master to buffer
     let master : Source* = source_getMaster(nil);
     for i = 0; i < len; i++
     {
@@ -31,7 +31,7 @@ fn audio_init(T : tea_State*) : void
     let rate : int32 = intcast(int32, tea_opt_integer(T, 0, 44100));
     let bufferSize : int32 = intcast(int32, tea_opt_integer(T, 1, 44100));
     //UNUSED(bufferSize);
-    if inited
+    if ainited
     {
         tea_error(T, "audio is already inited");
     }
@@ -50,7 +50,7 @@ fn audio_init(T : tea_State*) : void
     }*/
 
     samplerate = rate;
-    inited = true;
+    ainited = true;
     /*source_setSamplerate(samplerate);
 
     if ma_device_start(&device) != MA_SUCCESS
@@ -67,4 +67,5 @@ let areg : tea_Reg[] = {
 pub fn micro_open_audio(T : tea_State*) : void
 {
     tea_create_submodule(T, "audio", areg);
+    // Add .master Source field
 }

@@ -68,6 +68,9 @@ function micro.load()
     print(micro.fs.read("conf.tea"))
     //micro.fs.setWritePath('.')
     //print(micro.fs.write("test.txt", "Neve cadeva inesorabile. Era estate, ma tutto quello che Alderan riusciva a intravedere era un’infinita distesa di neve, sotto a un cielo color della cenere. Vaste montagne nere svettavano alle sue spalle."))
+
+    import sys
+    print(sys.argv)
 }
 
 function micro.update(dt)
@@ -156,6 +159,10 @@ function micro.keydown(e)
     {
         f = not f
         micro.window.setFullscreen(f);
+    }
+    else if e == 'k'
+    {
+        nil()
     }
 }
 

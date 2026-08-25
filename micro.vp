@@ -111,6 +111,11 @@ fn micro_open(T : tea_State*) : bool
     return true;
 }
 
+let myargv : uint8*[] = {
+    "micro_vp", "."
+};
+def myargc = 2;
+
 pub fn main() : int32
 {
     io::init();
@@ -118,6 +123,7 @@ pub fn main() : int32
     io::write(io::stdout, "=== GL Pixel Buffer Rendering Example ===\n", 42, nil);
 
     let T : tea_State* = tea_new_state(nil, nil);
+    tea_set_argv(T, myargc, myargv, 0);
 
     if not micro_open(T)
     {
