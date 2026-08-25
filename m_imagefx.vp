@@ -331,7 +331,7 @@ let fxreg : const tea_Reg[] = {
     {}
 };
 
-pub fn micro_open_fx(T : tea_State*) : void
+pub fn micro_open_imagefx(T : tea_State*) : void
 {
     tea_create_submodule(T, "imagefx", fxreg);
     initTables();

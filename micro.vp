@@ -16,6 +16,7 @@ from m_gfx import micro_open_gfx
 from m_font import micro_open_Font
 from m_data import micro_open_Data, micro_open_data
 from m_image import micro_open_Image
+from m_imagefx import micro_open_imagefx
 from m_fs import micro_open_fs
 from m_mouse import micro_open_mouse
 from m_system import micro_open_system
@@ -56,7 +57,7 @@ let mods : Mods[] = {
     {"window", micro_open_window},
     {"fs", micro_open_fs},
     {"gfx", micro_open_gfx},
-    //{"imagefx", micro_open_imagefx},
+    {"imagefx", micro_open_imagefx},
     {}
 };
 

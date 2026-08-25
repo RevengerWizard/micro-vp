@@ -29,7 +29,6 @@ function merge(dst, src)
 }
 
 var done = false
-
 function onerror(msg)
 {
     const lines = msg.split('\n')
@@ -122,6 +121,7 @@ function micro.error(msg, stacktrace)
     const str = msg + "\n\n" + stacktrace
     print("Error:\n" + str)
     // Override event handlers
+    handlers.clear()
     handlers["quit"] = function(e) { quit() }
     handlers["keydown"] = function(e) { if e['key'] == "escape" { quit() } }
 
@@ -245,8 +245,6 @@ micro.window.setSize(conf['window']['width'], conf['window']['height'])
 micro.gfx.setMaxFps(conf['maxfps'])
 micro.audio.init()
 
-print("inited?")
-
 // -------------------------------------------------------------------------------
 // Init project
 //-------------------------------------------------------------------------------
@@ -261,32 +259,12 @@ else
     // No project file -- init "no project loaded" screen
     const w = conf['width']
     const h = conf['height']
-    //const txt = micro.Font.fromEmbedded(8).render("No project loaded")
-    //const txtPost = txt.clone()
-    //const txtMask = txt.clone()
-    //var particles = []
+    const txt = micro.Font.fromEmbedded(8).render("No project loaded")
+    const txtPost = txt.clone()
+    const txtMask = txt.clone()
+    var particles = []
 
     function micro.load()
-    {
-        micro.gfx.setClearColor(38, 40, 38)
-    }
-
-    function micro.update(dt) { }
-
-    function micro.keydown(key)
-    {
-        if key == "escape" { micro.event.quit() }
-    }
-
-    function micro.draw()
-    {
-        // Draw particles
-        //const tx = (w - txt.getWidth()) / 2
-        //const ty = (h - txt.getHeight()) / 2
-        micro.gfx.print("No project loaded", 10, 10)
-    }
-
-    /*function micro.load()
     {
         micro.gfx.setClearColor(38, 40, 38)
         for var i = 1; i <= 30; i += 1
@@ -303,7 +281,7 @@ else
 
     function micro.update(dt)
     {
-        const n = micro.timer.getAverage()
+        const n = micro.timer.getTime()
         for const p in particles
         {
             p['x'] = math.cos(n * p['r']) * 100
@@ -319,15 +297,14 @@ else
     function micro.draw()
     {
         // Draw particles
-        micro.gfx.setBlend("add")
-        var lastx = nil
-        var lasty = nil
+        //micro.gfx.setBlend("add")
+        var lastx, lasty
         for const p in particles
         {
             const x = (p['x'] * p['z']) + w / 2
             const y = (p['y'] * p['z']) + w / 2
             micro.gfx.pixel(x, y, 255, 255, 255, 255)
-            if lastx != nil
+            if lastx
             {
                 micro.gfx.setAlpha(0.3 * 255)
                 micro.gfx.line(x, y, lastx, lasty, 255, 255, 255, 255)
@@ -336,16 +313,16 @@ else
             lasty = y
         }
         // Draw text
-        const n = micro.timer.getAverage() * 2
+        const n = micro.timer.getTime() * 2
         const x = (1 + math.sin(n)) * txtMask.getWidth() / 2
         txtPost.copyPixels(txt)
         txtMask.clear(255, 255, 255, 127)
-        micro.imagefx.mask(txtPost, txtMask, "a")
-        const tx = (w - txt.getWidth()) / 2
-        const ty = (h - txt.getHeight()) / 2
-        micro.gfx.setBlend("alpha")
-        micro.gfx.draw(txtPost, tx, ty + 130)
-    }*/
+        //micro.imagefx.mask(txtPost, txtMask, "a")
+        const tx = (w - txt.getWidth()) / w
+        const ty = (h - txt.getHeight()) / h
+        //micro.gfx.setBlend("alpha")
+        micro.gfx.draw(txtPost, tx + 2, ty + 2)
+    }
 }
 
 xpcall(function() { call(micro, "load") }, onerror)

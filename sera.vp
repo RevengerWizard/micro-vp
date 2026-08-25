@@ -412,8 +412,10 @@ fn copyPixelsScaled(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : 
 {
     var w : int32 = s.w * intcast(int32, scalex);
     var h : int32 = s.h * intcast(int32, scaley);
-    var inx : int32 = FX_UNIT / intcast(int32, scalex);
-    var iny : int32 = FX_UNIT / intcast(int32, scaley);
+    //var inx : int32 = intcast(int32, floatcast(float32, FX_UNIT) / scalex);
+    //var iny : int32 = intcast(int32, floatcast(float32, FX_UNIT) / scaley);
+    var inx : int32 = intcast(int32, 4096.0 / scalex);
+    var iny : int32 = intcast(int32, 4096.0 / scaley);
     var d : int32;
     // Clip to destination buffer
     d = b.clip.x - x;
@@ -428,22 +430,19 @@ fn copyPixelsScaled(b : sr_Buffer*, src : sr_Buffer*, x : int32, y : int32, s : 
     if w == 0 or h == 0
         return;
     // Draw
-    var sy  : int32 = s.y << FX_BITS;
-    var dy  : int32 = y;
-    while dy < y + h
+    var sy : int32 = s.y << FX_BITS;
+    for var dy : int32 = y; dy < y + h; dy++
     {
-        var p : sr_Pixel* = ptrcast(sr_Pixel*, src.pixels + (s.x >> FX_BITS) + src.w * (sy >> FX_BITS));
+        var p : sr_Pixel* = ptrcast(sr_Pixel*, src.pixels + intcast(isize, s.x >> FX_BITS) + intcast(isize, src.w) * intcast(isize, sy >> FX_BITS));
         var sx : int32 = 0;
         var dx : int32 = x + b.w * dy;
         var edx : int32 = dx + w;
         while dx < edx
         {
-            b.pixels[dx] = p[sx >> FX_BITS];
-            dx++;
+            b.pixels[dx++] = p[sx >> FX_BITS];
             sx += inx;
         }
         sy += iny;
-        dy++;
     }
 }
 

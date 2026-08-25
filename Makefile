@@ -10,6 +10,7 @@ SRCS = 	micro.vp \
 		m_gfx.vp \
 		m_data.vp \
 		m_image.vp \
+		m_imagefx.vp \
 		m_font.vp \
 		m_fs.vp \
 		m_mouse.vp \
@@ -69,6 +70,13 @@ $(TARGET): $(OBJS) $(C_OBJS) $(VXC_OBJS)
 %.obj: %.vp
 	@echo "  VXC                       $@"
 	@vxc comp $<
+
+# micro.vp #includes the generated embed headers, so it must re-compile
+# whenever any of them are regenerated (which itself is triggered by
+# changes to the underlying .tea / .ttf source files).
+micro.obj: micro.vp $(EMBED_VP_HEADERS)
+	@echo "  VXC                       $@"
+	@vxc comp micro.vp
 
 miniz.obj: miniz.c miniz.h
 	@echo "  CC                        $@"
