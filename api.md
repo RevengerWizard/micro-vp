@@ -4,6 +4,12 @@ This reference covers the public Teascript API exposed by micro.
 
 ## `micro`
 
+- `micro.run() : integer`
+  Main framework loop, returns `1` on exit.
+
+- `micro.errorhandler(msg : string, stacktrace : string)`
+  Called once on runtime failure.
+
 - `micro.load()`
   Called once after initialization, before the first frame.
 
