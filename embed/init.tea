@@ -37,7 +37,7 @@ function onerror(msg)
     if not done
     {
         done = true
-        micro.error(msg, stacktrace)
+        micro.errorhandler(msg, stacktrace)
     }
     else
     {
@@ -114,7 +114,7 @@ function micro.run()
     return xpcall(run, onerror)
 }
 
-function micro.error(msg, stacktrace)
+function micro.errorhandler(msg, stacktrace)
 {
     // Create and print error string
     const tab = "    "
