@@ -3,8 +3,8 @@ import std::mem as mem
 from teax import *
 from m_data import Data
 
-def SOURCE_BUFFER_MAX : int32 = 4096;
-def SOURCE_BUFFER_MASK : int32 = SOURCE_BUFFER_MAX - 1;
+pub def SOURCE_BUFFER_MAX : int32 = 4096;
+pub def SOURCE_BUFFER_MASK : int32 = SOURCE_BUFFER_MAX - 1;
 
 def FX_BITS : int32 = 12;
 def FX_UNIT : int32 = 1 << FX_BITS;
@@ -43,9 +43,9 @@ struct SourceEvent
     len : int32;
 }
 
-alias SourceEventHandler = fn(Source*, SourceEvent*) : void;
+pub alias SourceEventHandler = fn(Source*, SourceEvent*) : void;
 
-struct Source
+pub struct Source
 {
     rawBufLeft  : int32[SOURCE_BUFFER_MAX];
     rawBufRight : int32[SOURCE_BUFFER_MAX];
@@ -309,7 +309,7 @@ fn onEventOgg(s : Source*, e : SourceEvent*) : void
     }*/
 }
 
-pub fn source_getMaster(ref : int32*) : Source*
+pub fn source_getMaster(ref : int32*?) : Source*
 {
     if ref != nil
     {
@@ -660,6 +660,11 @@ fn source_stop(T : tea_State*) : void
     pushCommand(&c);
 }
 
+fn source_tostring(T : tea_State*) : void
+{
+    tea_push_lstring(T, "<Source>", 8);
+}
+
 let srreg : const tea_Methods[] =
 {
     {"fromData", "static", source_fromData, 1, 0},
@@ -674,6 +679,7 @@ let srreg : const tea_Methods[] =
     {"play", "method", source_play, 1, 1},
     {"pause", "method", source_pause, 1, 0},
     {"stop", "method", source_stop, 1, 0},
+    {"tostring", "method", source_tostring, 1, 0},
     {}
 };
 

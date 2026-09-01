@@ -23,11 +23,14 @@ from m_system import micro_open_system
 from m_source import micro_open_Source
 from m_audio import micro_open_audio
 
+from miniaudio import *
+
 pub def WIDTH = 200;
 pub def HEIGHT = 200;
 
 pub var pixbuf : Px*?;
 pub var screen : sr_Buffer*?;
+pub let adevice : ma_device* = &{};
 
 fn micro_open_keyboard(T : tea_State*) : void
 {
@@ -175,6 +178,8 @@ pub fn main() : int32
     }
 
     io::write(io::stdout, "Cleaning up...\n", 15, nil);
+
+    //ma_device_uninit(adevice);
 
     tea_close(T);
 

@@ -1,0 +1,1071 @@
+// miniaudio.vp - Viper bindings for miniaudio.h
+// Translated from miniaudio C declarations
+
+pub alias ma_channel = uint8;
+pub alias ma_thread = void*;
+pub alias ma_mutex = void*;
+pub alias ma_event = void*;
+pub alias ma_semaphore = void*;
+pub alias ma_wchar_win32 = uint16;
+pub alias ma_ptr = void*;
+pub alias ma_handle = void*;
+pub alias ma_proc = fn() : void;
+pub alias ma_bool8 = uint8;
+pub alias ma_bool32 = uint32;
+pub alias ma_float = float32;
+pub alias ma_double = float64;
+pub alias ma_uintptr = uint64;
+pub alias ma_int8 = int8;
+pub alias ma_uint8 = uint8;
+pub alias ma_int16 = int16;
+pub alias ma_uint16 = uint16;
+pub alias ma_int32 = int32;
+pub alias ma_uint32 = uint32;
+pub alias ma_int64 = int64;
+pub alias ma_uint64 = uint64;
+pub alias size_t = usize;
+pub alias ptrdiff_t = int64;
+
+pub enum ma_result : int32
+{
+    MA_SUCCESS = 0,
+    MA_ERROR = -1,
+    MA_INVALID_ARGS = -2,
+    MA_INVALID_OPERATION = -3,
+    MA_OUT_OF_MEMORY = -4,
+    MA_OUT_OF_RANGE = -5,
+    MA_ACCESS_DENIED = -6,
+    MA_DOES_NOT_EXIST = -7,
+    MA_ALREADY_EXISTS = -8,
+    MA_TOO_MANY_OPEN_FILES = -9,
+    MA_INVALID_FILE = -10,
+    MA_TOO_BIG = -11,
+    MA_PATH_TOO_LONG = -12,
+    MA_NAME_TOO_LONG = -13,
+    MA_NOT_DIRECTORY = -14,
+    MA_IS_DIRECTORY = -15,
+    MA_DIRECTORY_NOT_EMPTY = -16,
+    MA_AT_END = -17,
+    MA_NO_SPACE = -18,
+    MA_BUSY = -19,
+    MA_IO_ERROR = -20,
+    MA_INTERRUPT = -21,
+    MA_UNAVAILABLE = -22,
+    MA_ALREADY_IN_USE = -23,
+    MA_BAD_ADDRESS = -24,
+    MA_BAD_SEEK = -25,
+    MA_BAD_PIPE = -26,
+    MA_DEADLOCK = -27,
+    MA_TOO_MANY_LINKS = -28,
+    MA_NOT_IMPLEMENTED = -29,
+    MA_NO_MESSAGE = -30,
+    MA_BAD_MESSAGE = -31,
+    MA_NO_DATA_AVAILABLE = -32,
+    MA_INVALID_DATA = -33,
+    MA_TIMEOUT = -34,
+    MA_NO_NETWORK = -35,
+    MA_NOT_UNIQUE = -36,
+    MA_NOT_SOCKET = -37,
+    MA_NO_ADDRESS = -38,
+    MA_BAD_PROTOCOL = -39,
+    MA_PROTOCOL_UNAVAILABLE = -40,
+    MA_PROTOCOL_NOT_SUPPORTED = -41,
+    MA_PROTOCOL_FAMILY_NOT_SUPPORTED = -42,
+    MA_ADDRESS_FAMILY_NOT_SUPPORTED = -43,
+    MA_SOCKET_NOT_SUPPORTED = -44,
+    MA_CONNECTION_RESET = -45,
+    MA_ALREADY_CONNECTED = -46,
+    MA_NOT_CONNECTED = -47,
+    MA_CONNECTION_REFUSED = -48,
+    MA_NO_HOST = -49,
+    MA_IN_PROGRESS = -50,
+    MA_CANCELLED = -51,
+    MA_MEMORY_ALREADY_MAPPED = -52,
+    MA_CRC_MISMATCH = -100,
+    MA_FORMAT_NOT_SUPPORTED = -200,
+    MA_DEVICE_TYPE_NOT_SUPPORTED = -201,
+    MA_SHARE_MODE_NOT_SUPPORTED = -202,
+    MA_NO_BACKEND = -203,
+    MA_NO_DEVICE = -204,
+    MA_API_NOT_FOUND = -205,
+    MA_INVALID_DEVICE_CONFIG = -206,
+    MA_LOOP = -207,
+    MA_BACKEND_NOT_ENABLED = -208,
+    MA_DEVICE_NOT_INITIALIZED = -300,
+    MA_DEVICE_ALREADY_INITIALIZED = -301,
+    MA_DEVICE_NOT_STARTED = -302,
+    MA_DEVICE_NOT_STOPPED = -303,
+    MA_FAILED_TO_INIT_BACKEND = -400,
+    MA_FAILED_TO_OPEN_BACKEND_DEVICE = -401,
+    MA_FAILED_TO_START_BACKEND_DEVICE = -402,
+    MA_FAILED_TO_STOP_BACKEND_DEVICE = -403
+}
+
+pub enum ma_format : uint32
+{
+    ma_format_unknown = 0,
+    ma_format_u8 = 1,
+    ma_format_s16 = 2,
+    ma_format_s24 = 3,
+    ma_format_s32 = 4,
+    ma_format_f32 = 5,
+    ma_format_count
+}
+
+pub enum ma_device_type : int32
+{
+    ma_device_type_playback = 1,
+    ma_device_type_capture = 2,
+    ma_device_type_duplex = 3,
+    ma_device_type_loopback = 4
+}
+
+pub enum ma_share_mode : int32
+{
+    ma_share_mode_shared = 0,
+    ma_share_mode_exclusive = 1
+}
+
+pub enum ma_channel_mix_mode : int32
+{
+    ma_channel_mix_mode_rectangular = 0,
+    ma_channel_mix_mode_simple = 1,
+    ma_channel_mix_mode_custom_weights = 2,
+    ma_channel_mix_mode_default = 0
+}
+
+pub enum ma_performance_profile : int32
+{
+    ma_performance_profile_low_latency = 0,
+    ma_performance_profile_conservative = 1
+}
+
+pub enum ma_resample_algorithm : int32
+{
+    ma_resample_algorithm_linear = 0,
+    ma_resample_algorithm_custom = 1
+}
+
+pub enum ma_dither_mode : int32
+{
+    ma_dither_mode_none = 0,
+    ma_dither_mode_rectangle = 1,
+    ma_dither_mode_triangle = 2
+}
+
+pub enum ma_thread_priority : int32
+{
+    ma_thread_priority_idle = -5,
+    ma_thread_priority_lowest = -4,
+    ma_thread_priority_low = -3,
+    ma_thread_priority_normal = -2,
+    ma_thread_priority_high = -1,
+    ma_thread_priority_highest = 0,
+    ma_thread_priority_realtime = 1,
+    ma_thread_priority_default = 0
+}
+
+pub enum ma_backend : int32
+{
+    ma_backend_wasapi = 0,
+    ma_backend_dsound = 1,
+    ma_backend_winmm = 2,
+    ma_backend_coreaudio = 3,
+    ma_backend_sndio = 4,
+    ma_backend_audio4 = 5,
+    ma_backend_oss = 6,
+    ma_backend_pulseaudio = 7,
+    ma_backend_alsa = 8,
+    ma_backend_jack = 9,
+    ma_backend_aaudio = 10,
+    ma_backend_opensl = 11,
+    ma_backend_webaudio = 12,
+    ma_backend_custom = 13,
+    ma_backend_null = 14
+}
+
+pub enum ma_device_state : int32
+{
+    ma_device_state_uninitialized = 0,
+    ma_device_state_stopped = 1,
+    ma_device_state_started = 2,
+    ma_device_state_starting = 3,
+    ma_device_state_stopping = 4
+}
+
+pub struct ma_allocation_callbacks
+{
+    pUserData : void*;
+    onMalloc : fn(sz : size_t, pUserData : void*) : void*;
+    onRealloc : fn(p : void*, sz : size_t, pUserData : void*) : void*;
+    onFree : fn(p : void*, pUserData : void*) : void;
+}
+
+pub struct ma_log_callback
+{
+    onLog : fn(pUserData : void*, level : ma_uint32, pMessage : const int8*) : void;
+    pUserData : void*;
+}
+
+pub struct ma_log
+{
+    callbacks : ma_log_callback[4];
+    callbackCount : ma_uint32;
+    allocationCallbacks : ma_allocation_callbacks;
+    lock : ma_mutex;
+}
+
+pub union ma_device_id
+{
+    wasapi : ma_wchar_win32[64];
+    dsound : ma_uint8[16];
+    winmm : ma_uint32;
+    alsa : int8[256];
+    pulse : int8[256];
+    jack : int32;
+    coreaudio : int8[256];
+    sndio : int8[256];
+    audio4 : int8[256];
+    oss : int8[64];
+    aaudio : ma_int32;
+    opensl : ma_uint32;
+    webaudio : int8[32];
+    custom : union {
+        i : int32;
+        s : int8[256];
+        p : void*;
+    };
+    nullbackend : int32;
+}
+
+pub struct ma_device_info_data_formats
+{
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRate : ma_uint32;
+    flags : ma_uint32;
+}
+
+pub struct ma_device_info
+{
+    id : ma_device_id;
+    name : int8[256];
+    isDefault : ma_bool32;
+    nativeDataFormatCount : ma_uint32;
+    /*nativeDataFormats : struct {
+        format : ma_format;
+        channels : ma_uint32;
+        sampleRate : ma_uint32;
+        flags : ma_uint32;
+    }[64];*/
+    nativeDataFormats : ma_device_info_data_formats[64];
+}
+
+pub struct ma_device_descriptor
+{
+    pDeviceID : const ma_device_id*;
+    shareMode : ma_share_mode;
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRate : ma_uint32;
+    channelMap : ma_channel[254];
+    periodSizeInFrames : ma_uint32;
+    periodSizeInMilliseconds : ma_uint32;
+    periodCount : ma_uint32;
+}
+
+pub struct ma_backend_callbacks
+{
+    onContextInit : fn(pContext : ma_context*, pConfig : const ma_context_config*, pCallbacks : ma_backend_callbacks*) : ma_result;
+    onContextUninit : fn(pContext : ma_context*) : ma_result;
+    onContextEnumerateDevices : fn(pContext : ma_context*, callback : ma_enum_devices_callback_proc, pUserData : void*) : ma_result;
+    onContextGetDeviceInfo : fn(pContext : ma_context*, deviceType : ma_device_type, pDeviceID : const ma_device_id*, pDeviceInfo : ma_device_info*) : ma_result;
+    onDeviceInit : fn(pDevice : ma_device*, pConfig : const ma_device_config*, pDescriptorPlayback : ma_device_descriptor*, pDescriptorCapture : ma_device_descriptor*) : ma_result;
+    onDeviceUninit : fn(pDevice : ma_device*) : ma_result;
+    onDeviceStart : fn(pDevice : ma_device*) : ma_result;
+    onDeviceStop : fn(pDevice : ma_device*) : ma_result;
+    onDeviceRead : fn(pDevice : ma_device*, pFrames : void*, frameCount : ma_uint32, pFramesRead : ma_uint32*) : ma_result;
+    onDeviceWrite : fn(pDevice : ma_device*, pFrames : const void*, frameCount : ma_uint32, pFramesWritten : ma_uint32*) : ma_result;
+    onDeviceDataLoop : fn(pDevice : ma_device*) : ma_result;
+    onDeviceDataLoopWakeup : fn(pDevice : ma_device*) : ma_result;
+    onDeviceGetInfo : fn(pDevice : ma_device*, _type : ma_device_type, pDeviceInfo : ma_device_info*) : ma_result;
+}
+
+pub struct ma_context_config
+{
+    pLog : ma_log*;
+    threadPriority : ma_thread_priority;
+    threadStackSize : size_t;
+    pUserData : void*;
+    allocationCallbacks : ma_allocation_callbacks;
+    alsa : struct {
+        useVerboseDeviceEnumeration : ma_bool32;
+    };
+    pulse : struct {
+        pApplicationName : const int8*;
+        pServerName : const int8*;
+        tryAutoSpawn : ma_bool32;
+    };
+    coreaudio : struct {
+        sessionCategory : ma_ios_session_category;
+        sessionCategoryOptions : ma_uint32;
+        noAudioSessionActivate : ma_bool32;
+        noAudioSessionDeactivate : ma_bool32;
+    };
+    jack : struct {
+        pClientName : const int8*;
+        tryStartServer : ma_bool32;
+    };
+    custom : ma_backend_callbacks;
+}
+
+pub enum ma_ios_session_category : int32
+{
+    ma_ios_session_category_default = 0,
+    ma_ios_session_category_none = 1,
+    ma_ios_session_category_ambient = 2,
+    ma_ios_session_category_solo_ambient = 3,
+    ma_ios_session_category_playback = 4,
+    ma_ios_session_category_record = 5,
+    ma_ios_session_category_play_and_record = 6,
+    ma_ios_session_category_multi_route = 7
+}
+
+pub struct ma_resampler_config
+{
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRateIn : ma_uint32;
+    sampleRateOut : ma_uint32;
+    algorithm : ma_resample_algorithm;
+    pBackendVTable : ma_resampling_backend_vtable*;
+    pBackendUserData : void*;
+    linear : struct {
+        lpfOrder : ma_uint32;
+    };
+}
+
+pub struct ma_resampling_backend_vtable
+{
+    onGetHeapSize : fn(pUserData : void*, pConfig : const ma_resampler_config*, pHeapSizeInBytes : size_t*) : ma_result;
+    onInit : fn(pUserData : void*, pConfig : const ma_resampler_config*, pHeap : void*, ppBackend : void**) : ma_result;
+    onUninit : fn(pUserData : void*, pBackend : void*, pAllocationCallbacks : const ma_allocation_callbacks*) : void;
+    onProcess : fn(pUserData : void*, pBackend : void*, pFramesIn : const void*, pFrameCountIn : ma_uint64*, pFramesOut : void*, pFrameCountOut : ma_uint64*) : ma_result;
+    onSetRate : fn(pUserData : void*, pBackend : void*, sampleRateIn : ma_uint32, sampleRateOut : ma_uint32) : ma_result;
+    onGetInputLatency : fn(pUserData : void*, pBackend : const void*) : ma_uint64;
+    onGetOutputLatency : fn(pUserData : void*, pBackend : const void*) : ma_uint64;
+    onGetRequiredInputFrameCount : fn(pUserData : void*, pBackend : const void*, outputFrameCount : ma_uint64, pInputFrameCount : ma_uint64*) : ma_result;
+    onGetExpectedOutputFrameCount : fn(pUserData : void*, pBackend : const void*, inputFrameCount : ma_uint64, pOutputFrameCount : ma_uint64*) : ma_result;
+    onReset : fn(pUserData : void*, pBackend : void*) : ma_result;
+}
+
+pub struct ma_device_playback_config
+{
+    pDeviceID : const ma_device_id*;
+    format : ma_format;
+    channels : ma_uint32;
+    pChannelMap : ma_channel*;
+    channelMixMode : ma_channel_mix_mode;
+    calculateLFEFromSpatialChannels : ma_bool32;
+    shareMode : ma_share_mode;
+}
+
+pub struct ma_device_capture_config
+{
+    pDeviceID : const ma_device_id*;
+    format : ma_format;
+    channels : ma_uint32;
+    pChannelMap : ma_channel*;
+    channelMixMode : ma_channel_mix_mode;
+    calculateLFEFromSpatialChannels : ma_bool32;
+    shareMode : ma_share_mode;
+}
+
+pub struct ma_device_config
+{
+    deviceType : ma_device_type;
+    sampleRate : ma_uint32;
+    periodSizeInFrames : ma_uint32;
+    periodSizeInMilliseconds : ma_uint32;
+    periods : ma_uint32;
+    performanceProfile : ma_performance_profile;
+    noPreSilencedOutputBuffer : ma_bool8;
+    noClip : ma_bool8;
+    noDisableDenormals : ma_bool8;
+    noFixedSizedCallback : ma_bool8;
+    dataCallback : ma_device_data_proc;
+    notificationCallback : ma_device_notification_proc;
+    stopCallback : ma_stop_proc;
+    pUserData : void*;
+    resampling : ma_resampler_config;
+    playback : ma_device_playback_config;
+    capture : ma_device_capture_config;
+    wasapi : struct {
+        usage : ma_wasapi_usage;
+        noAutoConvertSRC : ma_bool8;
+        noDefaultQualitySRC : ma_bool8;
+        noAutoStreamRouting : ma_bool8;
+        noHardwareOffloading : ma_bool8;
+        loopbackProcessID : ma_uint32;
+        loopbackProcessExclude : ma_bool8;
+    };
+    alsa : struct {
+        noMMap : ma_bool32;
+        noAutoFormat : ma_bool32;
+        noAutoChannels : ma_bool32;
+        noAutoResample : ma_bool32;
+    };
+    pulse : struct {
+        pStreamNamePlayback : const int8*;
+        pStreamNameCapture : const int8*;
+    };
+    coreaudio : struct {
+        allowNominalSampleRateChange : ma_bool32;
+    };
+    opensl : struct {
+        streamType : ma_opensl_stream_type;
+        recordingPreset : ma_opensl_recording_preset;
+        enableCompatibilityWorkarounds : ma_bool32;
+    };
+    aaudio : struct {
+        usage : ma_aaudio_usage;
+        contentType : ma_aaudio_content_type;
+        inputPreset : ma_aaudio_input_preset;
+        allowedCapturePolicy : ma_aaudio_allowed_capture_policy;
+        noAutoStartAfterReroute : ma_bool32;
+        enableCompatibilityWorkarounds : ma_bool32;
+    };
+}
+
+pub alias ma_device_data_proc = fn(pDevice : ma_device*, pOutput : void*, pInput : const void*, frameCount : uint32) : void;
+pub alias ma_device_notification_proc = fn(pNotification : const ma_device_notification*) : void;
+pub alias ma_stop_proc = fn(pDevice : ma_device*) : void;
+pub alias ma_enum_devices_callback_proc = fn(pContext : ma_context*, deviceType : ma_device_type, pInfo : const ma_device_info*, pUserData : void*) : ma_bool32;
+
+pub enum ma_wasapi_usage : int32
+{
+    ma_wasapi_usage_default = 0,
+    ma_wasapi_usage_games = 1,
+    ma_wasapi_usage_pro_audio = 2
+}
+
+pub enum ma_opensl_stream_type : int32
+{
+    ma_opensl_stream_type_default = 0,
+    ma_opensl_stream_type_voice = 1,
+    ma_opensl_stream_type_system = 2,
+    ma_opensl_stream_type_ring = 3,
+    ma_opensl_stream_type_media = 4,
+    ma_opensl_stream_type_alarm = 5,
+    ma_opensl_stream_type_notification = 6
+}
+
+pub enum ma_opensl_recording_preset : int32
+{
+    ma_opensl_recording_preset_default = 0,
+    ma_opensl_recording_preset_generic = 1,
+    ma_opensl_recording_preset_camcorder = 2,
+    ma_opensl_recording_preset_voice_recognition = 3,
+    ma_opensl_recording_preset_voice_communication = 4,
+    ma_opensl_recording_preset_voice_unprocessed = 5
+}
+
+pub enum ma_aaudio_usage : int32
+{
+    ma_aaudio_usage_default = 0,
+    ma_aaudio_usage_media = 1,
+    ma_aaudio_usage_voice_communication = 2,
+    ma_aaudio_usage_voice_communication_signalling = 3,
+    ma_aaudio_usage_alarm = 4,
+    ma_aaudio_usage_notification = 5,
+    ma_aaudio_usage_notification_ringtone = 6,
+    ma_aaudio_usage_notification_event = 7,
+    ma_aaudio_usage_assistance_accessibility = 8,
+    ma_aaudio_usage_assistance_navigation_guidance = 9,
+    ma_aaudio_usage_assistance_sonification = 10,
+    ma_aaudio_usage_game = 11,
+    ma_aaudio_usage_assitant = 12,
+    ma_aaudio_usage_emergency = 13,
+    ma_aaudio_usage_safety = 14,
+    ma_aaudio_usage_vehicle_status = 15,
+    ma_aaudio_usage_announcement = 16
+}
+
+pub enum ma_aaudio_content_type : int32
+{
+    ma_aaudio_content_type_default = 0,
+    ma_aaudio_content_type_speech = 1,
+    ma_aaudio_content_type_music = 2,
+    ma_aaudio_content_type_movie = 3,
+    ma_aaudio_content_type_sonification = 4
+}
+
+pub enum ma_aaudio_input_preset : int32
+{
+    ma_aaudio_input_preset_default = 0,
+    ma_aaudio_input_preset_generic = 1,
+    ma_aaudio_input_preset_camcorder = 2,
+    ma_aaudio_input_preset_voice_recognition = 3,
+    ma_aaudio_input_preset_voice_communication = 4,
+    ma_aaudio_input_preset_unprocessed = 5,
+    ma_aaudio_input_preset_voice_performance = 6
+}
+
+pub enum ma_aaudio_allowed_capture_policy : int32
+{
+    ma_aaudio_allow_capture_default = 0,
+    ma_aaudio_allow_capture_by_all = 1,
+    ma_aaudio_allow_capture_by_system = 2,
+    ma_aaudio_allow_capture_by_none = 3
+}
+
+pub struct ma_device_notification
+{
+    pDevice : ma_device*;
+    _type : ma_device_notification_type;
+    data : union {
+        started : struct {
+            _unused : int32;
+        };
+        stopped : struct {
+            _unused : int32;
+        };
+        rerouted : struct {
+            _unused : int32;
+        };
+        interruption : struct {
+            _unused : int32;
+        };
+    };
+}
+
+pub enum ma_device_notification_type : int32
+{
+    ma_device_notification_type_started = 0,
+    ma_device_notification_type_stopped = 1,
+    ma_device_notification_type_rerouted = 2,
+    ma_device_notification_type_interruption_began = 3,
+    ma_device_notification_type_interruption_ended = 4,
+    ma_device_notification_type_unlocked = 5
+}
+
+pub struct ma_rb
+{
+    pBuffer : void*;
+    subbufferSizeInBytes : ma_uint32;
+    subbufferCount : ma_uint32;
+    subbufferStrideInBytes : ma_uint32;
+    encodedReadOffset : ma_uint32;
+    encodedWriteOffset : ma_uint32;
+    ownsBuffer : ma_bool8;
+    clearOnWriteAcquire : ma_bool8;
+    allocationCallbacks : ma_allocation_callbacks;
+}
+
+pub struct ma_pcm_rb
+{
+    rb : ma_rb;
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRate : ma_uint32;
+}
+
+pub struct ma_duplex_rb
+{
+    rb : ma_pcm_rb;
+}
+
+pub struct ma_data_converter
+{
+    formatIn : ma_format;
+    formatOut : ma_format;
+    channelsIn : ma_uint32;
+    channelsOut : ma_uint32;
+    sampleRateIn : ma_uint32;
+    sampleRateOut : ma_uint32;
+    ditherMode : ma_dither_mode;
+    executionPath : ma_data_converter_execution_path;
+    channelConverter : ma_channel_converter;
+    resampler : ma_resampler;
+    hasPreFormatConversion : ma_bool8;
+    hasPostFormatConversion : ma_bool8;
+    hasChannelConverter : ma_bool8;
+    hasResampler : ma_bool8;
+    isPassthrough : ma_bool8;
+    _ownsHeap : ma_bool8;
+    _pHeap : void*;
+}
+
+pub enum ma_data_converter_execution_path : int32
+{
+    ma_data_converter_execution_path_passthrough = 0,
+    ma_data_converter_execution_path_format_only = 1,
+    ma_data_converter_execution_path_channels_only = 2,
+    ma_data_converter_execution_path_resample_only = 3,
+    ma_data_converter_execution_path_resample_first = 4,
+    ma_data_converter_execution_path_channels_first = 5
+}
+
+pub struct ma_channel_converter
+{
+    format : ma_format;
+    channelsIn : ma_uint32;
+    channelsOut : ma_uint32;
+    mixingMode : ma_channel_mix_mode;
+    conversionPath : ma_channel_conversion_path;
+    pChannelMapIn : ma_channel*;
+    pChannelMapOut : ma_channel*;
+    pShuffleTable : ma_uint8*;
+    weights : union {
+        f32 : float32**;
+        s16 : ma_int32**;
+    };
+    _pHeap : void*;
+    _ownsHeap : ma_bool32;
+}
+
+pub enum ma_channel_conversion_path : int32
+{
+    ma_channel_conversion_path_unknown = 0,
+    ma_channel_conversion_path_passthrough = 1,
+    ma_channel_conversion_path_mono_out = 2,
+    ma_channel_conversion_path_mono_in = 3,
+    ma_channel_conversion_path_shuffle = 4,
+    ma_channel_conversion_path_weights = 5
+}
+
+pub struct ma_resampler
+{
+    pBackend : ma_resampling_backend*;
+    pBackendVTable : ma_resampling_backend_vtable*;
+    pBackendUserData : void*;
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRateIn : ma_uint32;
+    sampleRateOut : ma_uint32;
+    state : union {
+        linear : ma_linear_resampler;
+    };
+    _pHeap : void*;
+    _ownsHeap : ma_bool32;
+}
+
+pub struct ma_linear_resampler
+{
+    config : ma_linear_resampler_config;
+    inAdvanceInt : ma_uint32;
+    inAdvanceFrac : ma_uint32;
+    inTimeInt : ma_uint32;
+    inTimeFrac : ma_uint32;
+    x0 : union {
+        f32 : float32*;
+        s16 : ma_int16*;
+    };
+    x1 : union {
+        f32 : float32*;
+        s16 : ma_int16*;
+    };
+    lpf : ma_lpf;
+    _pHeap : void*;
+    _ownsHeap : ma_bool32;
+}
+
+pub struct ma_linear_resampler_config
+{
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRateIn : ma_uint32;
+    sampleRateOut : ma_uint32;
+    lpfOrder : ma_uint32;
+    lpfNyquistFactor : float64;
+}
+
+pub struct ma_lpf
+{
+    format : ma_format;
+    channels : ma_uint32;
+    sampleRate : ma_uint32;
+    lpf1Count : ma_uint32;
+    lpf2Count : ma_uint32;
+    pLPF1 : ma_lpf1*;
+    pLPF2 : ma_lpf2*;
+    _pHeap : void*;
+    _ownsHeap : ma_bool32;
+}
+
+pub struct ma_lpf1
+{
+    format : ma_format;
+    channels : ma_uint32;
+    a : ma_biquad_coefficient;
+    pR1 : ma_biquad_coefficient*;
+    _pHeap : void*;
+    _ownsHeap : ma_bool32;
+}
+
+pub struct ma_lpf2
+{
+    bq : ma_biquad;
+}
+
+pub struct ma_biquad
+{
+    format : ma_format;
+    channels : ma_uint32;
+    b0 : ma_biquad_coefficient;
+    b1 : ma_biquad_coefficient;
+    b2 : ma_biquad_coefficient;
+    a1 : ma_biquad_coefficient;
+    a2 : ma_biquad_coefficient;
+    pR1 : ma_biquad_coefficient*;
+    pR2 : ma_biquad_coefficient*;
+    _pHeap : void*;
+    _ownsHeap : ma_bool32;
+}
+
+pub union ma_biquad_coefficient
+{
+    f32 : float32;
+    s32 : ma_int32;
+}
+
+pub alias ma_resampling_backend = void;
+
+pub struct ma_device
+{
+    pContext : ma_context*;
+    _type : ma_device_type;
+    sampleRate : ma_uint32;
+    state : ma_atomic_device_state;
+    onData : ma_device_data_proc;
+    onNotification : ma_device_notification_proc;
+    onStop : ma_stop_proc;
+    pUserData : void*;
+    startStopLock : ma_mutex;
+    wakeupEvent : ma_event;
+    startEvent : ma_event;
+    stopEvent : ma_event;
+    thread : ma_thread;
+    workResult : ma_result;
+    isOwnerOfContext : ma_bool8;
+    noPreSilencedOutputBuffer : ma_bool8;
+    noClip : ma_bool8;
+    noDisableDenormals : ma_bool8;
+    noFixedSizedCallback : ma_bool8;
+    masterVolumeFactor : ma_atomic_float;
+    duplexRB : ma_duplex_rb;
+    resampling : struct {
+        algorithm : ma_resample_algorithm;
+        pBackendVTable : ma_resampling_backend_vtable*;
+        pBackendUserData : void*;
+        linear : struct {
+            lpfOrder : ma_uint32;
+        };
+    };
+    playback : struct {
+        pID : ma_device_id*;
+        id : ma_device_id;
+        name : int8[256];
+        shareMode : ma_share_mode;
+        format : ma_format;
+        channels : ma_uint32;
+        channelMap : ma_channel[254];
+        internalFormat : ma_format;
+        internalChannels : ma_uint32;
+        internalSampleRate : ma_uint32;
+        internalChannelMap : ma_channel[254];
+        internalPeriodSizeInFrames : ma_uint32;
+        internalPeriods : ma_uint32;
+        channelMixMode : ma_channel_mix_mode;
+        calculateLFEFromSpatialChannels : ma_bool32;
+        converter : ma_data_converter;
+        pIntermediaryBuffer : void*;
+        intermediaryBufferCap : ma_uint32;
+        intermediaryBufferLen : ma_uint32;
+        pInputCache : void*;
+        inputCacheCap : ma_uint64;
+        inputCacheConsumed : ma_uint64;
+        inputCacheRemaining : ma_uint64;
+    };
+    capture : struct {
+        pID : ma_device_id*;
+        id : ma_device_id;
+        name : int8[256];
+        shareMode : ma_share_mode;
+        format : ma_format;
+        channels : ma_uint32;
+        channelMap : ma_channel[254];
+        internalFormat : ma_format;
+        internalChannels : ma_uint32;
+        internalSampleRate : ma_uint32;
+        internalChannelMap : ma_channel[254];
+        internalPeriodSizeInFrames : ma_uint32;
+        internalPeriods : ma_uint32;
+        channelMixMode : ma_channel_mix_mode;
+        calculateLFEFromSpatialChannels : ma_bool32;
+        converter : ma_data_converter;
+        pIntermediaryBuffer : void*;
+        intermediaryBufferCap : ma_uint32;
+        intermediaryBufferLen : ma_uint32;
+    };
+    union {
+        wasapi : struct {
+            pAudioClientPlayback : ma_ptr;
+            pAudioClientCapture : ma_ptr;
+            pRenderClient : ma_ptr;
+            pCaptureClient : ma_ptr;
+            pDeviceEnumerator : ma_ptr;
+            notificationClient : ma_IMMNotificationClient;
+            hEventPlayback : ma_handle;
+            hEventCapture : ma_handle;
+            actualBufferSizeInFramesPlayback : ma_uint32;
+            actualBufferSizeInFramesCapture : ma_uint32;
+            originalPeriodSizeInFrames : ma_uint32;
+            originalPeriodSizeInMilliseconds : ma_uint32;
+            originalPeriods : ma_uint32;
+            originalPerformanceProfile : ma_performance_profile;
+            periodSizeInFramesPlayback : ma_uint32;
+            periodSizeInFramesCapture : ma_uint32;
+            pMappedBufferCapture : void*;
+            mappedBufferCaptureCap : ma_uint32;
+            mappedBufferCaptureLen : ma_uint32;
+            pMappedBufferPlayback : void*;
+            mappedBufferPlaybackCap : ma_uint32;
+            mappedBufferPlaybackLen : ma_uint32;
+            isStartedCapture : ma_atomic_bool32;
+            isStartedPlayback : ma_atomic_bool32;
+            loopbackProcessID : ma_uint32;
+            loopbackProcessExclude : ma_bool8;
+            noAutoConvertSRC : ma_bool8;
+            noDefaultQualitySRC : ma_bool8;
+            noHardwareOffloading : ma_bool8;
+            allowCaptureAutoStreamRouting : ma_bool8;
+            allowPlaybackAutoStreamRouting : ma_bool8;
+            isDetachedPlayback : ma_bool8;
+            isDetachedCapture : ma_bool8;
+            usage : ma_wasapi_usage;
+            hAvrtHandle : void*;
+            rerouteLock : ma_mutex;
+        };
+        dsound : struct {
+            pPlayback : ma_ptr;
+            pPlaybackPrimaryBuffer : ma_ptr;
+            pPlaybackBuffer : ma_ptr;
+            pCapture : ma_ptr;
+            pCaptureBuffer : ma_ptr;
+        };
+        winmm : struct {
+            hDevicePlayback : ma_handle;
+            hDeviceCapture : ma_handle;
+            hEventPlayback : ma_handle;
+            hEventCapture : ma_handle;
+            fragmentSizeInFrames : ma_uint32;
+            iNextHeaderPlayback : ma_uint32;
+            iNextHeaderCapture : ma_uint32;
+            headerFramesConsumedPlayback : ma_uint32;
+            headerFramesConsumedCapture : ma_uint32;
+            pWAVEHDRPlayback : ma_uint8*;
+            pWAVEHDRCapture : ma_uint8*;
+            pIntermediaryBufferPlayback : ma_uint8*;
+            pIntermediaryBufferCapture : ma_uint8*;
+            _pHeapData : ma_uint8*;
+        };
+        jack : struct {
+            pClient : ma_ptr;
+            ppPortsPlayback : ma_ptr*;
+            ppPortsCapture : ma_ptr*;
+            pIntermediaryBufferPlayback : float32*;
+            pIntermediaryBufferCapture : float32*;
+        };
+        null_device : struct {
+            deviceThread : ma_thread;
+            operationEvent : ma_event;
+            operationCompletionEvent : ma_event;
+            operationSemaphore : ma_semaphore;
+            operation : ma_uint32;
+            operationResult : ma_result;
+            timer : ma_timer;
+            priorRunTime : float64;
+            currentPeriodFramesRemainingPlayback : ma_uint32;
+            currentPeriodFramesRemainingCapture : ma_uint32;
+            lastProcessedFramePlayback : ma_uint64;
+            lastProcessedFrameCapture : ma_uint64;
+            isStarted : ma_atomic_bool32;
+        };
+    }
+}
+
+pub struct ma_atomic_device_state
+{
+    value : ma_device_state;
+}
+
+pub struct ma_atomic_float
+{
+    value : ma_float;
+}
+
+pub struct ma_atomic_bool32
+{
+    value : ma_bool32;
+}
+
+pub union ma_timer
+{
+    counter : ma_int64;
+    counterD : float64;
+}
+
+pub struct ma_IMMNotificationClient
+{
+    lpVtbl : void*;
+    counter : ma_uint32;
+    pDevice : ma_device*;
+}
+
+pub struct ma_context
+{
+    callbacks : ma_backend_callbacks;
+    backend : ma_backend;
+    pLog : ma_log*;
+    log : ma_log;
+    threadPriority : ma_thread_priority;
+    threadStackSize : size_t;
+    pUserData : void*;
+    allocationCallbacks : ma_allocation_callbacks;
+    deviceEnumLock : ma_mutex;
+    deviceInfoLock : ma_mutex;
+    deviceInfoCapacity : ma_uint32;
+    playbackDeviceInfoCount : ma_uint32;
+    captureDeviceInfoCount : ma_uint32;
+    pDeviceInfos : ma_device_info*;
+    union
+    {
+        wasapi : struct {
+            commandThread : ma_thread;
+            commandLock : ma_mutex;
+            commandSem : ma_semaphore;
+            commandIndex : ma_uint32;
+            commandCount : ma_uint32;
+            commands : ma_context_command__wasapi[4];
+            hAvrt : ma_handle;
+            AvSetMmThreadCharacteristicsA : ma_proc;
+            AvRevertMmThreadcharacteristics : ma_proc;
+            hMMDevapi : ma_handle;
+            ActivateAudioInterfaceAsync : ma_proc;
+        };
+        dsound : struct {
+            hDSoundDLL : ma_handle;
+            DirectSoundCreate : ma_proc;
+            DirectSoundEnumerateA : ma_proc;
+            DirectSoundCaptureCreate : ma_proc;
+            DirectSoundCaptureEnumerateA : ma_proc;
+        };
+        winmm : struct {
+            hWinMM : ma_handle;
+            waveOutGetNumDevs : ma_proc;
+            waveOutGetDevCapsA : ma_proc;
+            waveOutOpen : ma_proc;
+            waveOutClose : ma_proc;
+            waveOutPrepareHeader : ma_proc;
+            waveOutUnprepareHeader : ma_proc;
+            waveOutWrite : ma_proc;
+            waveOutReset : ma_proc;
+            waveInGetNumDevs : ma_proc;
+            waveInGetDevCapsA : ma_proc;
+            waveInOpen : ma_proc;
+            waveInClose : ma_proc;
+            waveInPrepareHeader : ma_proc;
+            waveInUnprepareHeader : ma_proc;
+            waveInAddBuffer : ma_proc;
+            waveInStart : ma_proc;
+            waveInReset : ma_proc;
+        };
+        jack : struct {
+            jackSO : ma_handle;
+            jack_client_open : ma_proc;
+            jack_client_close : ma_proc;
+            jack_client_name_size : ma_proc;
+            jack_set_process_callback : ma_proc;
+            jack_set_buffer_size_callback : ma_proc;
+            jack_on_shutdown : ma_proc;
+            jack_get_sample_rate : ma_proc;
+            jack_get_buffer_size : ma_proc;
+            jack_get_ports : ma_proc;
+            jack_activate : ma_proc;
+            jack_deactivate : ma_proc;
+            jack_connect : ma_proc;
+            jack_port_register : ma_proc;
+            jack_port_name : ma_proc;
+            jack_port_get_buffer : ma_proc;
+            jack_free : ma_proc;
+            pClientName : int8*;
+            tryStartServer : ma_bool32;
+        };
+        win32 : struct {
+            hOle32DLL : ma_handle;
+            CoInitialize : ma_proc;
+            CoInitializeEx : ma_proc;
+            CoUninitialize : ma_proc;
+            CoCreateInstance : ma_proc;
+            CoTaskMemFree : ma_proc;
+            PropVariantClear : ma_proc;
+            StringFromGUID2 : ma_proc;
+            hUser32DLL : ma_handle;
+            GetForegroundWindow : ma_proc;
+            GetDesktopWindow : ma_proc;
+            hAdvapi32DLL : ma_handle;
+            RegOpenKeyExA : ma_proc;
+            RegCloseKey : ma_proc;
+            RegQueryValueExA : ma_proc;
+            CoInitializeResult : int32;
+        };
+        null_backend : struct {
+            _unused : int32;
+        };
+    }
+}
+
+pub struct ma_context_command__wasapi
+{
+    code : int32;
+    pEvent : ma_event*;
+    data : union {
+        quit : struct {
+            _unused : int32;
+        };
+        createAudioClient : struct {
+            deviceType : ma_device_type;
+            pAudioClient : void*;
+            ppAudioClientService : void**;
+            pResult : ma_result*;
+        };
+        releaseAudioClient : struct {
+            pDevice : ma_device*;
+            deviceType : ma_device_type;
+        };
+    };
+}
+
+//#staticassert(sizeof(ma_device_id) == 256);
+//#staticassert(sizeof(ma_device) == 3312);
+//#staticassert(offsetof(ma_device, pUserData) == 48);
+//#staticassert(offsetof(ma_device, playback.channels) == 824);
+
+// Function prototypes
+pub fn ma_context_config_init() : ma_context_config;
+pub fn ma_context_init(backends : const ma_backend*?, backendCount : ma_uint32, pConfig : const ma_context_config*, pContext : ma_context*) : ma_result;
+pub fn ma_context_uninit(pContext : ma_context*) : ma_result;
+pub fn ma_device_config_init(deviceType : ma_device_type) : ma_device_config;
+pub fn ma_device_init(pContext : ma_context*?, pConfig : const ma_device_config*, pDevice : ma_device*) : ma_result;
+pub fn ma_device_start(pDevice : ma_device*) : ma_result;
+pub fn ma_device_stop(pDevice : ma_device*) : ma_result;
+pub fn ma_device_uninit(pDevice : ma_device*) : void;
+pub fn ma_device_get_context(pDevice : ma_device*) : ma_context*;
+pub fn ma_device_is_started(pDevice : const ma_device*) : ma_bool32;
+pub fn ma_device_get_state(pDevice : const ma_device*) : ma_device_state;
+pub fn ma_device_get_master_volume(pDevice : ma_device*, pVolume : float32*) : ma_result;
+pub fn ma_device_set_master_volume(pDevice : ma_device*, volume : float32) : ma_result;
+pub fn ma_context_enumerate_devices(pContext : ma_context*, callback : ma_enum_devices_callback_proc, pUserData : void*) : ma_result;
+pub fn ma_context_get_devices(pContext : ma_context*, ppPlaybackDeviceInfos : ma_device_info**, pPlaybackDeviceCount : ma_uint32*, ppCaptureDeviceInfos : ma_device_info**, pCaptureDeviceCount : ma_uint32*) : ma_result;
+pub fn ma_context_get_device_info(pContext : ma_context*, deviceType : ma_device_type, pDeviceID : const ma_device_id*, pDeviceInfo : ma_device_info*) : ma_result;

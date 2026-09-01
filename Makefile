@@ -24,7 +24,7 @@ SRCS = 	micro.vp \
         stb_truetype.vp
 
 OBJS = $(SRCS:.vp=.obj)
-C_OBJS = miniz.obj
+C_OBJS = miniz.obj miniaudio.obj
 
 # Use an environment variable...
 #VXC_STD ?=
@@ -81,6 +81,10 @@ micro.obj: micro.vp $(EMBED_VP_HEADERS)
 miniz.obj: miniz.c miniz.h
 	@echo "  CC                        $@"
 	@$(CC) $(MINIZ_CFLAGS) -c miniz.c -o $@
+
+miniaudio.obj: miniaudio.c
+	@echo "  CC                        $@"
+	@$(CC) $(CFLAGS) -DMINIAUDIO_IMPLEMENTATION -c miniaudio.c -o $@
 
 clean:
 	@rm -f $(OBJS) $(C_OBJS) $(TARGET)

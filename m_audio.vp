@@ -1,59 +1,98 @@
+import std::mem as mem
+
 from tea import *
+from miniaudio import *
+
+from m_source import *
+from m_data import *
+
+from micro import *
 
 var ainited : bool = false;
-var samplerate : float64;
+var asamplerate : float64;
 
-/*fn audio_callback(pDevice : ma_device*, pOutput : void*, pInput : const void*, frameCount : ma_uint32) : void
+fn audio_malloc(sz : usize, pUserData : void*) : void*
 {
-    let T : tea_State* = ptrcast(tea_State*, pDevice.pUserData);
-    let buffer : int16_t* = ptrcast(int16_t*, pOutput);
-    let len : int32 = frameCount * pDevice.playback.channels;
-    var i : int32;
+    //(void)pUserData;
+    return mem::alloc(sz);
+}
+
+fn audio_realloc(p : void*, sz : usize, pUserData : void*) : void*
+{
+    //(void)pUserData;
+    return mem::realloc(p, sz);
+}
+
+fn audio_free(p : void*, pUserData : void*) : void
+{
+    //(void)pUserData;
+    mem::free(p);
+}
+
+fn audio_callback(pDevice : ma_device*, pOutput : void*, pInput : const void*, frameCount : uint32) : void
+{
+    //let T : tea_State* = ptrcast(tea_State*, pDevice.pUserData);
+    //let buffer : int16* = ptrcast(int16*, pOutput);
+    //let len : int32 = intcast(int32, frameCount) * intcast(int32, pDevice.playback.channels);
+    //var i : int32;
     //UNUSED(T);
 
     // Process source commands
-    source_processCommands();
+    /*source_processCommands();
     // Process sources audio
     source_processAllSources(len);
     // Copy master to buffer
     let master : Source* = source_getMaster(nil);
     for i = 0; i < len; i++
     {
-        let x : int32 = master->buf[i];
-        buffer[i] = CLAMP(x, -32768, 32767);
-    }
+        let x : int32 = master.buf[i];
+        //buffer[i] = CLAMP(x, -32768, 32767);
+        buffer[i] = intcast(int16, x < -32768 ? -32768 : (x > 32767 ? 32767 : x));
+    }*/
 
     //UNUSED(pInput);
-}*/
+}
 
 fn audio_init(T : tea_State*) : void
 {
     let rate : int32 = intcast(int32, tea_opt_integer(T, 0, 44100));
     let bufferSize : int32 = intcast(int32, tea_opt_integer(T, 1, 44100));
-    //UNUSED(bufferSize);
     if ainited
     {
         tea_error(T, "audio is already inited");
     }
 
-    /*ma_device_config config;
-    config = ma_device_config_init(ma_device_type_playback);
-    config.playback.format = ma_format_s16;
-    config.playback.channels = 2;
-    config.sampleRate = rate;
-    config.dataCallback = audio_callback;
-    config.pUserData = T;
+    /*let allocationCallbacks : ma_allocation_callbacks;
+    allocationCallbacks.onMalloc = audio_malloc;
+    allocationCallbacks.onRealloc = audio_realloc;
+    allocationCallbacks.onFree = audio_free;
 
-    if ma_device_init(nil, &config, &device) != MA_SUCCESS
+    let context : ma_context;
+    let contextConfig : ma_context_config = ma_context_config_init();
+    contextConfig.allocationCallbacks = allocationCallbacks;
+
+    if ma_context_init(nil, 0, &contextConfig, &context) != ma_result::MA_SUCCESS
+    {
+        tea_error(T, "could not init audio context");
+    }
+
+    let config : ma_device_config = ma_device_config_init(ma_device_type::ma_device_type_playback);
+    config.playback.format = ma_format::ma_format_s16;
+    config.playback.channels = 2;
+    config.sampleRate = intcast(uint32, rate);
+    config.dataCallback = ptrcast(ma_device_data_proc, audio_callback);
+    config.pUserData = ptrcast(void*, T);
+
+    if ma_device_init(&context, &config, adevice) != ma_result::MA_SUCCESS
     {
         tea_error(T, "could not init audio");
     }*/
 
-    samplerate = rate;
+    asamplerate = floatcast(float64, rate);
     ainited = true;
-    /*source_setSamplerate(samplerate);
+    source_setSamplerate(intcast(int32, asamplerate));
 
-    if ma_device_start(&device) != MA_SUCCESS
+    /*if ma_device_start(adevice) != ma_result::MA_SUCCESS
     {
         tea_error(T, "could not start audio");
     }*/
@@ -67,5 +106,11 @@ let areg : tea_Reg[] = {
 pub fn micro_open_audio(T : tea_State*) : void
 {
     tea_create_submodule(T, "audio", areg);
+
     // Add .master Source field
+    let ref : int32;
+    source_getMaster(&ref);
+    tea_push_integer(T, intcast(tea_Integer, ref));
+    tea_get_field(T, TEA_REGISTRY_INDEX);
+    tea_set_attr(T, -2, "master");
 }
