@@ -160,7 +160,7 @@ let greg : const tea_Reg[] = {
     {"setColor", gfx_setColor, 0, 4},
     {"setMaxFps", gfx_setMaxFps, 0, 4},
     {"clear", gfx_clear, 0, 4},
-    {"reset", gfx_clear, 0, 0},
+    {"reset", gfx_reset, 0, 0},
     {"pixel", gfx_pixel, 2, 4},
     {"line", gfx_line, 4, 4},
     {"rect", gfx_rect, 5, 4},
