@@ -1002,6 +1002,12 @@ pub struct ma_context
             pClientName : int8*;
             tryStartServer : ma_bool32;
         };
+        null_backend : struct {
+            _unused : int32;
+        };
+    }
+    union
+    {
         win32 : struct {
             hOle32DLL : ma_handle;
             CoInitialize : ma_proc;
@@ -1020,9 +1026,7 @@ pub struct ma_context
             RegQueryValueExA : ma_proc;
             CoInitializeResult : int32;
         };
-        null_backend : struct {
-            _unused : int32;
-        };
+        _unused : int32;
     }
 }
 
