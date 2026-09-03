@@ -167,7 +167,7 @@ pub fn main() : int32
         let now : float64 = glfwGetTime();
         let wait : float64 = step - (now - last);
         last += step;
-        if wait > float64(0.0)
+        if wait > 0.0
         {
             Sleep(intcast(DWORD, wait * float64(1000.0)));
         }

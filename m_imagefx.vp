@@ -201,8 +201,8 @@ fn fx_wave(T : tea_State*) : void
     checkBufferSizesMatch(T, self, src);
     let amountX : int32 = intcast(int32, tea_check_number(T, 2));
     let amountY : int32 = intcast(int32, tea_check_number(T, 3));
-    let scaleX : int32 = intcast(int32, tea_check_number(T, 4) * floatcast(tea_Number, FX_UNIT));
-    let scaleY : int32 = intcast(int32, tea_check_number(T, 5) * floatcast(tea_Number, FX_UNIT));
+    let scaleX : int32 = intcast(int32, tea_check_number(T, 4) * FX_UNIT);
+    let scaleY : int32 = intcast(int32, tea_check_number(T, 5) * FX_UNIT);
     let offsetX : int32 = intcast(int32, tea_opt_integer(T, 6, 0)) * FX_UNIT;
     let offsetY : int32 = intcast(int32, tea_opt_integer(T, 7, 0)) * FX_UNIT;
     for var y : int32 = 0; y < self.buf.h; y++
