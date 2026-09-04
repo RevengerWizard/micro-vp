@@ -248,12 +248,12 @@ fn event_poll(T : tea_State*) : void
         case GLEQtype::GLEQ_CODEPOINT_INPUT
         {
             let utf8 : uint8[5] = {};
-            let len : int32 = utf32_to_utf8(e.codepoint, utf8);
+            let len : int32 = utf32_to_utf8(e.codepoint, ptrcast(uint8*, utf8));
             if(len > 0)
             {
                 tea_push_lstring(T, "textinput", 9);
                 tea_set_key(T, -2, "type");
-                tea_push_lstring(T, utf8, intcast(usize, len));
+                tea_push_lstring(T, ptrcast(const uint8*, utf8), intcast(usize, len));
                 tea_set_key(T, -2, "text");
             }
         }

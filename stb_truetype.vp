@@ -782,21 +782,21 @@ pub fn stbtt_GetGlyphShape(info : const stbtt_fontinfo*, glyph_index : int32, pv
                 // @TODO handle matching point
                 // STBTT_assert(0);
             }
-            if (comp_flags & uint16(1 << 3)) != 0  // WE_HAVE_A_SCALE
+            if (comp_flags & (1 << 3)) != 0  // WE_HAVE_A_SCALE
             {
                 mtx[0] = floatcast(float32, ttSHORT(comp)) / 16384.0; comp = comp + 2;
                 mtx[3] = mtx[0];
                 mtx[1] = 0.0;
                 mtx[2] = 0.0;
             }
-            else if (comp_flags & uint16(1 << 6)) != 0  // WE_HAVE_AN_X_AND_YSCALE
+            else if (comp_flags & (1 << 6)) != 0  // WE_HAVE_AN_X_AND_YSCALE
             {
                 mtx[0] = floatcast(float32, ttSHORT(comp)) / 16384.0; comp = comp + 2;
                 mtx[1] = 0.0;
                 mtx[2] = 0.0;
                 mtx[3] = floatcast(float32, ttSHORT(comp)) / 16384.0; comp = comp + 2;
             }
-            else if (comp_flags & uint16(1 << 7)) != 0  // WE_HAVE_A_TWO_BY_TWO
+            else if (comp_flags & (1 << 7)) != 0  // WE_HAVE_A_TWO_BY_TWO
             {
                 mtx[0] = floatcast(float32, ttSHORT(comp)) / 16384.0; comp = comp + 2;
                 mtx[1] = floatcast(float32, ttSHORT(comp)) / 16384.0; comp = comp + 2;
@@ -1251,7 +1251,7 @@ fn stbtt__rasterize_sorted_edges(result : stbtt__bitmap*, e : stbtt__edge*, n : 
         mem::free(z);
     }
 
-    if scanline != scanline_data
+    if scanline != ptrcast(uint8*, scanline_data)
     {
         mem::free(scanline);
     }
@@ -1830,7 +1830,7 @@ fn stbtt__h_prefilter(pixels : uint8*, w : int32, h : int32, stride_in_bytes : i
     {
         var i : int32;
         var total : uint32;
-        mem::set(buffer, 0, intcast(usize, kernel_width));
+        mem::set(ptrcast(void*, buffer), 0, intcast(usize, kernel_width));
         total = 0u32;
 
         // make kernel_width a constant in common cases so compiler can optimize out the divide
@@ -1892,7 +1892,7 @@ fn stbtt__v_prefilter(pixels : uint8*, w : int32, h : int32, stride_in_bytes : i
     {
         var i : int32;
         var total : uint32;
-        mem::set(buffer, 0, intcast(usize, kernel_width));
+        mem::set(ptrcast(void*, buffer), 0, intcast(usize, kernel_width));
         total = 0u32;
 
         switch kernel_width

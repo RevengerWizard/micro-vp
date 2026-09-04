@@ -415,7 +415,7 @@ pub fn source_process(self : Source*, len : int32) : void
     /* Replace flag still set? Zeroset the buffer */
     if (self.flags & SOURCE_FREPLACE) != 0
     {
-        mem::set(self.buf, 0, intcast(usize, len) * sizeof(int32));
+        mem::set(ptrcast(void*, self.buf), 0, intcast(usize, len) * sizeof(int32));
     }
     /* Process audio stream */
     if self.state == SOURCE_STATE_PLAYING and self.onEvent != nil
@@ -468,7 +468,7 @@ pub fn source_process(self : Source*, len : int32) : void
     {
         if (self.dest.flags & SOURCE_FREPLACE) != 0
         {
-            mem::copy(self.dest.buf, self.buf, intcast(usize, len) * sizeof(int32));
+            mem::copy(ptrcast(void*, self.dest.buf), ptrcast(void*, self.buf), intcast(usize, len) * sizeof(int32));
             self.dest.flags &= ~SOURCE_FREPLACE;
         }
         else
@@ -685,7 +685,7 @@ let srreg : const tea_Methods[] =
 
 pub fn micro_open_Source(T : tea_State*) : void
 {
-    tea_create_class(T, "Source", srreg);
+    tea_create_class(T, "Source", ptrcast(tea_Methods*, srreg));
     tea_push_value(T, -1);
     tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Source");
     teaState = T;

@@ -78,7 +78,7 @@ let reg : tea_Methods[] = {
 
 pub fn micro_open_Data(T : tea_State*) : void
 {
-    tea_create_class(T, "Data", reg);
+    tea_create_class(T, "Data", ptrcast(tea_Methods*, reg));
     tea_push_value(T, -1);
     tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Data");
 }
@@ -228,5 +228,5 @@ let dmod : tea_Reg[] = {
 
 pub fn micro_open_data(T : tea_State*) : void
 {
-    tea_create_submodule(T, "data", dmod);
+    tea_create_submodule(T, "data", ptrcast(tea_Reg*, dmod));
 }

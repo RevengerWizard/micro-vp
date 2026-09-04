@@ -82,11 +82,11 @@ struct Items
     size : usize;
 }
 let items : Items[] = {
-    {"graphics.tea", graphics_tea, sizeof(typeof(graphics_tea))},
-    {"keyboard.tea", keyboard_tea, sizeof(typeof(keyboard_tea))},
-    {"mouse.tea", mouse_tea, sizeof(typeof(mouse_tea))},
-    {"timer.tea", timer_tea, sizeof(typeof(timer_tea))},
-    {"init.tea", init_tea, sizeof(typeof(init_tea))},
+    {"graphics.tea", ptrcast(const uint8*, graphics_tea), sizeof(typeof(graphics_tea))},
+    {"keyboard.tea", ptrcast(const uint8*, keyboard_tea), sizeof(typeof(keyboard_tea))},
+    {"mouse.tea", ptrcast(const uint8*, mouse_tea), sizeof(typeof(mouse_tea))},
+    {"timer.tea", ptrcast(const uint8*, timer_tea), sizeof(typeof(timer_tea))},
+    {"init.tea", ptrcast(const uint8*, init_tea), sizeof(typeof(init_tea))},
     {}
 };
 
@@ -155,7 +155,7 @@ pub fn main() : int32
                 io::write(io::stderr, "\n", 1, nil);
                 break;
             }
-            if (tea_get_type(T, -1) == TEA_TYPE_NUMBER) and tea_get_number(T, -1) == float64(1.0)
+            if (tea_get_type(T, -1) == TEA_TYPE_NUMBER) and tea_get_number(T, -1) == 1.0
                 break;
             tea_pop(T, 1);
         }
@@ -169,7 +169,7 @@ pub fn main() : int32
         last += step;
         if wait > 0.0
         {
-            Sleep(intcast(DWORD, wait * float64(1000.0)));
+            Sleep(intcast(DWORD, wait * floatcast(float64, 1000.0)));
         }
         else
         {

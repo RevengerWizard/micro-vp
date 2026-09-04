@@ -254,7 +254,7 @@ let ireg : const tea_Methods[] = {
 
 pub fn micro_open_Image(T : tea_State*) : void
 {
-    tea_create_class(T, "Image", ireg);
+    tea_create_class(T, "Image", ptrcast(tea_Methods*, ireg));
     tea_push_value(T, -1);
     tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Image");
 }

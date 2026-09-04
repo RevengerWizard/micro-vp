@@ -64,7 +64,7 @@ fn font_fromFile(T : tea_State*) : void
 
 from embed::font_ttf import font_ttf
 
-let f : const uint8* = font_ttf; //bug...
+let f : const uint8* = ptrcast(const uint8*, font_ttf); //bug...
 
 fn font_fromEmbedded(T : tea_State*) : void
 {
@@ -136,7 +136,7 @@ let freg :  const tea_Methods[] = {
 
 pub fn micro_open_Font(T : tea_State*) : void
 {
-    tea_create_class(T, "Font", freg);
+    tea_create_class(T, "Font", ptrcast(tea_Methods*, freg));
     tea_push_value(T, -1);
     tea_set_key(T, TEA_REGISTRY_INDEX, "micro.Font");
 }

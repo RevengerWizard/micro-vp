@@ -1219,7 +1219,7 @@ fn stbi__start_callbacks(s : stbi__context*, c : stbi_io_callbacks*, user : void
     s.io_user_data = user;
     s.buflen = 128;    // sizeof(s.buffer_start)
     s.read_from_callbacks = 1;
-    s.img_buffer_original = cast(uint8*, s.buffer_start);
+    s.img_buffer_original = ptrcast(uint8*, s.buffer_start);
     stbi__refill_buffer(s);
 }
 
@@ -1324,14 +1324,14 @@ fn stbi__refill_buffer(s : stbi__context*) : void
     if n == 0
     {
         s.read_from_callbacks = 0;
-        s.img_buffer = cast(uint8*, s.buffer_start);
-        s.img_buffer_end = s.buffer_start + 1;
+        s.img_buffer = ptrcast(uint8*, s.buffer_start);
+        s.img_buffer_end = ptrcast(uint8*, s.buffer_start) + 1;
         *s.img_buffer = 0;
     }
     else
     {
-        s.img_buffer = cast(uint8*, s.buffer_start);
-        s.img_buffer_end = s.buffer_start + intcast(usize, n);
+        s.img_buffer = ptrcast(uint8*, s.buffer_start);
+        s.img_buffer_end = ptrcast(uint8*, s.buffer_start) + intcast(usize, n);
     }
 }
 
@@ -1445,8 +1445,8 @@ fn stbi__parse_zlib(a : stbi__zbuf*, parse_header : int32) : int32
             {
                 // Use fixed code lengths
                 if stbi__zdefault_distance[31] == 0 { stbi__init_zdefaults(); }
-                if stbi__zbuild_huffman(&a.z_length, stbi__zdefault_length, 288) == 0 return 0;
-                if stbi__zbuild_huffman(&a.z_distance, stbi__zdefault_distance, 32) == 0 return 0;
+                if stbi__zbuild_huffman(&a.z_length, ptrcast(uint8*, stbi__zdefault_length), 288) == 0 return 0;
+                if stbi__zbuild_huffman(&a.z_distance, ptrcast(uint8*, stbi__zdefault_distance), 32) == 0 return 0;
             }
             else
             {
@@ -1634,7 +1634,7 @@ fn stbi__compute_huffman_codes(a : stbi__zbuf*) : int32
         var idx : usize = intcast(usize, stbi__length_dezigzag[i]);
         codelength_sizes[idx] = intcast(uint8, s);
     }
-    if stbi__zbuild_huffman(&z_codelength, codelength_sizes, 19) == 0 return 0;
+    if stbi__zbuild_huffman(&z_codelength, ptrcast(uint8*, codelength_sizes), 19) == 0 return 0;
 
     n = 0;
     while n < hlit + hdist
@@ -1649,26 +1649,26 @@ fn stbi__compute_huffman_codes(a : stbi__zbuf*) : int32
         else if c == 16
         {
             c = intcast(int32, stbi__zreceive(a, 2)) + 3;
-            mem::set(lencodes + n, lencodes[n - 1], intcast(usize, c));
+            mem::set(ptrcast(uint8*, lencodes) + n, lencodes[n - 1], intcast(usize, c));
             n += c;
         }
         else if c == 17
         {
             c = intcast(int32, stbi__zreceive(a, 3)) + 3;
-            mem::set(lencodes + n, 0, intcast(usize, c));
+            mem::set(ptrcast(uint8*, lencodes) + n, 0, intcast(usize, c));
             n += c;
         }
         else
         {
             // STBI_ASSERT(c == 18);
             c = intcast(int32, stbi__zreceive(a, 7)) + 11;
-            mem::set(lencodes + n, 0, intcast(usize, c));
+            mem::set(ptrcast(uint8*, lencodes) + n, 0, intcast(usize, c));
             n += c;
         }
     }
 
     if n != hlit + hdist return stbi__err("bad codelengths");
-    if stbi__zbuild_huffman(&a.z_length, lencodes, hlit) == 0 return 0;
-    if stbi__zbuild_huffman(&a.z_distance, lencodes + intcast(usize, hlit), hdist) == 0 return 0;
+    if stbi__zbuild_huffman(&a.z_length, ptrcast(uint8*, lencodes), hlit) == 0 return 0;
+    if stbi__zbuild_huffman(&a.z_distance, ptrcast(uint8*, lencodes) + intcast(usize, hlit), hdist) == 0 return 0;
     return 1;
 }
