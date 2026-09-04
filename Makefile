@@ -1,4 +1,4 @@
-TARGET = micro_vp.exe
+TARGET = micro-vp.exe
 
 SRCS = 	micro.vp \
 		sera.vp \
@@ -82,9 +82,9 @@ miniz.obj: miniz.c miniz.h
 	@echo "  CC                        $@"
 	@$(CC) $(MINIZ_CFLAGS) -c miniz.c -o $@
 
-miniaudio.obj: miniaudio.c
-	@echo "  CC                        $@"
-	@$(CC) $(CFLAGS) -DMINIAUDIO_IMPLEMENTATION -c miniaudio.c -o $@
+#miniaudio.obj: miniaudio.c
+#	@echo "  CC                        $@"
+#	@$(CC) $(CFLAGS) -DMINIAUDIO_IMPLEMENTATION -c miniaudio.c -o $@
 
 clean:
 	@rm -f $(OBJS) $(C_OBJS) $(TARGET)
